@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>Vellichor</Name>
+  <Repository>ghcr.io/woodscode/vellichor-web:latest</Repository>
+  <Registry>https://github.com/woodscode/vellichor-web/pkgs/container/vellichor-web</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/woodscode/vellichor-web/issues</Support>
+  <Project>https://github.com/woodscode/vellichor-web</Project>
+  <Overview>Self-hosted web app that turns your written stories and ebooks into narrated audiobooks using the Kokoro-82M TTS model. Multi-voice character casting, background ambience, chaptered M4B + per-chapter MP3 output, and auto-export to an Audiobookshelf library. Optional NVIDIA GPU acceleration (requires the Nvidia Driver plugin); falls back to CPU. Optional AI "Smart cast" needs a separate Ollama container — set Ollama URL below; without it the rule-based Quick detect is used.</Overview>
+  <Category>MediaApp:Books Productivity:</Category>
+  <WebUI>http://[IP]:[PORT:7777]/</WebUI>
+  <Icon>https://raw.githubusercontent.com/woodscode/vellichor-web/main/unraid/icon.png</Icon>
+  <ExtraParams>--runtime=nvidia</ExtraParams>
+  <PostArgs/>
+  <DonateText/>
+  <DonateLink/>
+  <Description>Turn stories &amp; ebooks into narrated audiobooks with Kokoro-82M TTS. Multi-voice casting, ambience, M4B/MP3, Audiobookshelf export. GPU optional.</Description>
+  <Config Name="WebUI Port" Target="7777" Default="7777" Mode="tcp" Description="Port for the web UI." Type="Port" Display="always" Required="true" Mask="false">7777</Config>
+  <Config Name="App data (/data)" Target="/data" Default="/mnt/user/appdata/vellichor/data" Mode="rw" Description="Uploads, job history, and the model cache (Kokoro). Persisted." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/vellichor/data</Config>
+  <Config Name="Audiobook library (/library)" Target="/library" Default="" Mode="rw" Description="Optional. Where finished audiobooks are exported, e.g. your Audiobookshelf library share. Leave blank if unused." Type="Path" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="Login password" Target="VELLICHOR_PASSWORD" Default="" Mode="" Description="Web UI login password. LEAVE BLANK ONLY ON A TRUSTED LAN — blank disables authentication entirely." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="Secret key" Target="SECRET_KEY" Default="" Mode="" Description="Session-cookie signing key. Generate with: openssl rand -hex 32. Blank = a random key each restart (everyone gets logged out on restart)." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="Ollama URL (AI Smart cast)" Target="OLLAMA_URL" Default="" Mode="" Description="Optional. URL of a separate Ollama container for AI Smart cast, e.g. http://192.168.1.50:11434. Blank disables Smart cast (rule-based Quick detect still works)." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Smart cast model" Target="SMARTCAST_MODEL" Default="llama3.2:3b" Mode="" Description="Ollama model used for Smart cast (must be pulled in your Ollama container)." Type="Variable" Display="advanced" Required="false" Mask="false">llama3.2:3b</Config>
+  <Config Name="Completion notify URL" Target="NOTIFY_URL" Default="" Mode="" Description="Optional ntfy/gotify URL to get a push when a conversion finishes." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Export owner UID" Target="ABS_UID" Default="99" Mode="" Description="UID to own exported audiobook files so your library app can read them (Unraid 'nobody' = 99)." Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+  <Config Name="Export owner GID" Target="ABS_GID" Default="100" Mode="" Description="GID to own exported files (Unraid 'users' = 100)." Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+  <Config Name="NVIDIA_VISIBLE_DEVICES" Target="NVIDIA_VISIBLE_DEVICES" Default="all" Mode="" Description="GPU(s) to expose. Requires the Nvidia Driver plugin. NO GPU? Clear 'Extra Parameters' (remove --runtime=nvidia) and ignore this." Type="Variable" Display="advanced" Required="false" Mask="false">all</Config>
+  <Config Name="NVIDIA_DRIVER_CAPABILITIES" Target="NVIDIA_DRIVER_CAPABILITIES" Default="compute,utility" Mode="" Description="Leave as-is for GPU acceleration." Type="Variable" Display="advanced" Required="false" Mask="false">compute,utility</Config>
+</Container>
