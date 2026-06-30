@@ -5,9 +5,40 @@ narrated audiobooks using the **Kokoro-82M** TTS model. GPU-accelerated and
 light enough to run on a modest card (originally built on a GTX 1080); falls
 back to CPU. Built for writing & converting stories. Open source (MIT).
 
-- **URL:** http://<server-ip>:7777
-- **Login password:** see `VELLICHOR_PASSWORD` in `.env` (save it in Bitwarden)
-- **Project dir:** `/mnt/user/appdata/vellichor-web`
+## Requirements
+- **Docker** and **Docker Compose**.
+- **(Optional) NVIDIA GPU** for acceleration — requires the NVIDIA Container
+  Toolkit on the host (on Unraid, the **Nvidia Driver** plugin). With no GPU it
+  runs on CPU instead — see the no-GPU note in *Getting started*.
+- ~6 GB of disk for the image plus models (Kokoro + the Ollama LLM, downloaded
+  on first use).
+
+## Getting started
+```bash
+# 1. Clone
+git clone https://github.com/woodscode/vellichor-web.git
+cd vellichor-web
+
+# 2. Create your .env: set a login password and a cookie-signing key
+cp .env.example .env
+sed -i "s|^SECRET_KEY=.*|SECRET_KEY=$(openssl rand -hex 32)|" .env
+$EDITOR .env                       # set VELLICHOR_PASSWORD
+
+# 3. Edit docker-compose.yml for your box:
+#    - Audiobookshelf export mount (…:/library) — repoint to your library, or
+#      remove the volume if you don't use Audiobookshelf
+#    - host port (default 7777:7777)
+#    - NO GPU? remove the `runtime: nvidia` and `NVIDIA_*` lines from BOTH
+#      services (it then runs on CPU — slower, but works)
+
+# 4. Build & start
+docker compose up -d --build
+
+# 5. (Optional) enable AI Smart cast — pull the local LLM once
+docker exec vellichor-ollama ollama pull llama3.2:3b
+```
+Then open **http://<server-ip>:7777** and log in with your `VELLICHOR_PASSWORD`.
+Store that password in your password manager.
 
 ## Features
 - Built-in **story editor** (type/paste, `#` lines become chapters) + upload
@@ -44,7 +75,7 @@ back to CPU. Built for writing & converting stories. Open source (MIT).
 
 ## Managing it
 ```bash
-cd /mnt/user/appdata/vellichor-web
+cd vellichor-web                # your project directory
 docker compose up -d            # start / apply changes
 docker compose logs -f          # watch logs
 docker compose down             # stop
@@ -52,14 +83,17 @@ docker compose up -d --build    # rebuild after editing app/ code
 ```
 
 ## AI Smart cast (Ollama)
-The `ollama` service (in docker-compose) runs the local LLM on the GPU. After
-first `docker compose up -d`, pull the model once:
+Smart cast is **optional** — without it, multi-voice casting uses the
+rule-based **Quick detect** instead. To enable it, the `ollama` service (in
+docker-compose) runs a local LLM. After the first `docker compose up -d`, pull
+the model once:
 ```bash
 docker exec vellichor-ollama ollama pull llama3.2:3b
 ```
-Both models share the 1080; `OLLAMA_KEEP_ALIVE=2m` unloads the LLM from VRAM
-after use so Kokoro has room. To try a more accurate (heavier) model, pull it
-and set `SMARTCAST_MODEL` in `.env` (e.g. `qwen2.5:7b`), then `up -d`.
+Both models share the GPU; `OLLAMA_KEEP_ALIVE=2m` unloads the LLM from VRAM
+after use so Kokoro has room (on an 8 GB card they can't both stay resident).
+To try a more accurate (heavier) model, pull it and set `SMARTCAST_MODEL` in
+`.env` (e.g. `qwen2.5:7b`), then `up -d`.
 
 ## Configuration (`.env`)
 - `VELLICHOR_PASSWORD` — login password (change anytime, then `up -d`).
