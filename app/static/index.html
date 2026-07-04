@@ -43,7 +43,8 @@
         <textarea id="storyText" class="field story" placeholder="Once upon a time…
 
 Write or paste your story here. Use # Heading lines to split it into chapters."></textarea>
-        <div class="hint">Tip: lines starting with <code># </code> become chapter breaks.</div>
+        <div class="hint">Tip: lines starting with <code># </code> become chapter breaks.
+          Add <code>[pause 2s]</code> for a silence, or <code>[slow]</code>…<code>[normal]</code> to change the pace.</div>
       </div>
 
       <div class="tabpane" id="pane-upload">
@@ -84,6 +85,10 @@ Write or paste your story here. Use # Heading lines to split it into chapters.">
 
       <label class="lbl">Reading speed · <span id="speedVal">1.0×</span></label>
       <input type="range" id="speed" min="0.5" max="1.5" step="0.05" value="1.0" />
+
+      <label class="lbl">Output loudness · <span id="loudVal">Loud</span></label>
+      <input type="range" id="loud" min="0" max="3" step="1" value="2" />
+      <div class="hint">Boosts the final volume — helps on quiet speakers (e.g. a Toniebox).</div>
 
       <label class="lbl">Author / narrator label</label>
       <input id="author" class="field" placeholder="Vellichor" />

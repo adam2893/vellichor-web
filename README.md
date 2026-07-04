@@ -43,11 +43,19 @@ Store that password in your password manager.
 ## Features
 - Built-in **story editor** (type/paste, `#` lines become chapters) + upload
   `.txt`, `.md`, `.epub`, `.pdf`, `.docx`.
+- **Narration directives** — inline cues the studio interprets itself:
+  `[pause 3s]` / `[pause]` / `[beat]` insert real silence, and `[slow]`,
+  `[fast]`, `[normal]` change the pace of the following text. (These are
+  reserved words — they're never read aloud or mistaken for a `[Name]` speaker
+  tag.)
 - **Voice picker** with 35 voices, grouped/filterable, each with a ▶ sample.
   Story-friendly voices are starred (★). `af_heart` is the default.
 - **Live preview** — hear your chosen voice read the current text before
   committing to a full conversion.
 - Reading-speed slider, optional cover art, author label.
+- **Output loudness** control (Off / Standard / Loud / Extra loud) — applies
+  EBU R128 loudness normalization so the finished book plays at a consistent,
+  full volume, even on quiet speakers (e.g. a Toniebox). Defaults to *Loud*.
 - **Live progress** (stage, segment count, ETA) + per-job log.
 - **🎭 Multi-voice cast** — give each character their own voice. Three ways:
   - **🪄 Smart cast (AI)** — a local Ollama model (Llama 3.2 3B) reads the story,

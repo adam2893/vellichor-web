@@ -8,6 +8,8 @@ The result is mapped to per-speaker voices for synthesis.
 """
 import re
 
+from directives import KEYWORDS as _DIR_KW
+
 NARRATOR = "Narrator"
 
 SPEECH_VERBS = (
@@ -17,8 +19,10 @@ SPEECH_VERBS = (
     r"declared|insisted|warned|teased|grumbled|giggled|sobbed|bellowed"
 )
 
-# [Name] tag (line-leading or inline), optional trailing colon
-TAG = re.compile(r"\[([^\]\n]{1,40})\]\s*:?\s*")
+# [Name] tag (line-leading or inline), optional trailing colon. The negative
+# lookahead skips reserved directives ([pause], [slow], …) so they're never
+# treated as a speaker.
+TAG = re.compile(r"\[(?!\s*(?i:" + _DIR_KW + r")\b)([^\]\n]{1,40})\]\s*:?\s*")
 # Double quotes only (straight or curly) — single quotes collide with contractions
 QUOTE_SPAN = re.compile(r"[“\"]([^“”\"]{1,2000}?)[”\"]")
 _VERB_AFTER = re.compile(r"^\s*[,]?\s*(?:" + SPEECH_VERBS + r")\s+([A-Z][\w'-]+)")

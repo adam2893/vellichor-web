@@ -125,6 +125,12 @@ $('#voiceSearch').addEventListener('input', renderVoices);
 // ---------- speed ----------
 $('#speed').addEventListener('input', (e) => $('#speedVal').textContent = (+e.target.value).toFixed(2) + '×');
 
+// ---------- loudness ----------
+// slider index -> label / LUFS target (0 = off, i.e. leave the audio untouched)
+const LOUD_LABELS = ['Off', 'Standard', 'Loud', 'Extra loud'];
+const LOUD_LUFS = [0, -18, -16, -14];
+$('#loud').addEventListener('input', (e) => $('#loudVal').textContent = LOUD_LABELS[+e.target.value]);
+
 // ---------- upload ----------
 const dz = $('#dropzone'), fileInput = $('#fileInput');
 dz.addEventListener('click', () => fileInput.click());
@@ -167,6 +173,7 @@ $('#convertBtn').addEventListener('click', async () => {
   const fd = new FormData();
   fd.append('voice', selected);
   fd.append('speed', $('#speed').value);
+  fd.append('loudness', LOUD_LUFS[+$('#loud').value]);
   fd.append('author', $('#author').value || 'Vellichor');
   fd.append('export_abs', $('#exportAbs').checked);
   const formats = [];

@@ -14,6 +14,7 @@ import extract as extractor
 import cast as castmod
 import ambience as amb
 import voices as voicecat
+import directives
 import gpu
 
 class Cancelled(Exception):
@@ -23,9 +24,13 @@ class Cancelled(Exception):
 LIBRARY_DIR = "/library"           # bind-mounted Audiobookshelf library
 ABS_UID = int(os.environ.get("ABS_UID", "911"))
 ABS_GID = int(os.environ.get("ABS_GID", "911"))
-GAP = np.zeros(int(SAMPLE_RATE * 0.6), dtype="float32")   # between chapters
-SEG_GAP = np.zeros(int(SAMPLE_RATE * 0.28), dtype="float32")  # between speakers
-TITLE_GAP = np.zeros(int(SAMPLE_RATE * 0.9), dtype="float32")  # after a chapter title
+def _silence(seconds: float) -> np.ndarray:
+    return np.zeros(int(SAMPLE_RATE * max(0.0, seconds)), dtype="float32")
+
+
+GAP = _silence(0.8)        # lead-in silence before each new chapter / title
+SEG_GAP = _silence(0.28)   # between two *different* speakers
+TITLE_GAP_S = 0.9          # beat after a chapter title (emitted as a pause op)
 
 
 def safe_name(name: str) -> str:
@@ -82,27 +87,65 @@ def _chown(path):
         pass
 
 
-def _plan_chapter(ch, multivoice, narrator_voice, cast_map):
-    """Return a list of segments: [{voice, chunks:[...]}] for one chapter. A
-    chapter title (when present) is its own leading segment so a pause can
-    follow it before the body begins."""
+def _clamp_speed(x: float) -> float:
+    return max(0.5, min(2.0, x))
+
+
+def _spans_for(text, multivoice, narrator_voice, cast_map):
+    """A run of prose -> ordered [(voice, body)] spans."""
     if multivoice:
-        segs = castmod.build_segments(ch["text"], narrator_voice, cast_map)
-        body = []
-        for s in segs:
-            chunks = ENGINE.chunk_text(s["text"])
-            if chunks:
-                body.append({"voice": s["voice"], "chunks": chunks})
-        body = body or [{"voice": narrator_voice, "chunks": ENGINE.chunk_text(ch["text"])}]
-    else:
-        body = [{"voice": narrator_voice, "chunks": ENGINE.chunk_text(ch["text"])}]
+        return [(s["voice"], s["text"])
+                for s in castmod.build_segments(text, narrator_voice, cast_map)]
+    return [(narrator_voice, text)]
+
+
+def _plan_chapter(ch, multivoice, narrator_voice, cast_map, base_speed):
+    """Return an ordered op list for one chapter. Each op is either
+    {"kind":"speak", voice, text, speed} or {"kind":"pause", seconds}.
+
+    Inline [pause]/[slow] directives become pause/speed ops; a chapter title
+    (when present) is read first, followed by a beat before the body begins."""
+    ops = []
 
     spoken_title = ch.get("spoken_title")
     if spoken_title:
-        tchunks = ENGINE.chunk_text(spoken_title)
-        if tchunks:
-            return [{"voice": narrator_voice, "chunks": tchunks, "title": True}] + body
-    return body
+        for tchunk in ENGINE.chunk_text(spoken_title):
+            ops.append({"kind": "speak", "voice": narrator_voice,
+                        "speed": _clamp_speed(base_speed), "text": tchunk})
+        if ops:
+            ops.append({"kind": "pause", "seconds": TITLE_GAP_S})
+
+    mult = 1.0
+    for kind, val in directives.tokenize(ch["text"]):
+        if kind == "speed":
+            mult = val
+        elif kind == "pause":
+            ops.append({"kind": "pause", "seconds": val})
+        else:  # a run of prose
+            for voice, body in _spans_for(val, multivoice, narrator_voice, cast_map):
+                for chunk in ENGINE.chunk_text(body):
+                    ops.append({"kind": "speak", "voice": voice,
+                                "speed": _clamp_speed(base_speed * mult),
+                                "text": chunk})
+
+    if not any(o["kind"] == "speak" for o in ops):
+        for chunk in ENGINE.chunk_text(directives.strip(ch["text"])):
+            ops.append({"kind": "speak", "voice": narrator_voice,
+                        "speed": _clamp_speed(base_speed), "text": chunk})
+    return ops
+
+
+def _loudnorm_af(job):
+    """ffmpeg loudness-normalization filter to hit a target LUFS — louder,
+    consistent output that carries on quiet playback devices. None = leave
+    the audio untouched."""
+    try:
+        lufs = float(job.get("loudness"))
+    except (TypeError, ValueError):
+        return None
+    if lufs >= 0 or lufs < -30:        # 0 / positive means "off"
+        return None
+    return f"loudnorm=I={lufs:.1f}:TP=-1.5:LRA=11"
 
 
 def run(job: dict, progress) -> dict:
@@ -146,10 +189,11 @@ def run(job: dict, progress) -> dict:
             for k, v in list(cast_map.items())[:14])
         progress(log=f"Cast: {pretty}")
 
-    # ---- 2. Plan segments/chunks (for accurate progress) ----------------
+    # ---- 2. Plan speak/pause ops (for accurate progress) ----------------
     for ch in chapters:
-        ch["segments"] = _plan_chapter(ch, multivoice, voice, cast_map)
-    total_chunks = sum(len(s["chunks"]) for c in chapters for s in c["segments"]) or 1
+        ch["ops"] = _plan_chapter(ch, multivoice, voice, cast_map, speed)
+    total_chunks = sum(1 for c in chapters for o in c["ops"]
+                       if o["kind"] == "speak") or 1
     mode = "multi-voice" if multivoice else "single voice"
     progress(stage="Preparing", percent=4,
              chapters_total=len(chapters), chunks_total=total_chunks,
@@ -165,24 +209,30 @@ def run(job: dict, progress) -> dict:
     with gpu.LOCK:
         gpu.release_ollama()
         for idx, ch in enumerate(chapters):
-            parts = []
-            multi_seg = len(ch["segments"]) > 1
-            for seg in ch["segments"]:
-                for chunk in seg["chunks"]:
-                    if job.get("cancel"):
-                        raise Cancelled()
-                    parts.append(ENGINE.synth_chunk(chunk, seg["voice"], speed))
-                    done += 1
-                    elapsed = time.time() - t0
-                    rate = done / elapsed if elapsed > 0 else 0
-                    eta = int((total_chunks - done) / rate) if rate > 0 else None
-                    pct = 4 + int(done / total_chunks * 76)
-                    progress(stage=f"Narrating: {ch['title']}", percent=pct,
-                             chapters_done=idx, chunks_done=done, eta=eta)
-                if seg.get("title"):
-                    parts.append(TITLE_GAP)      # beat after the chapter title
-                elif multi_seg:
+            # A short settle before each new chapter/title so it doesn't run
+            # straight into the tail of the previous one.
+            parts = [GAP] if idx > 0 else []
+            prev_voice = None
+            for op in ch["ops"]:
+                if job.get("cancel"):
+                    raise Cancelled()
+                if op["kind"] == "pause":
+                    parts.append(_silence(op["seconds"]))
+                    prev_voice = None        # a pause already separates speakers
+                    continue
+                # Only gap between *different* speakers — a character with several
+                # lines in a row now flows as one continuous turn.
+                if multivoice and prev_voice is not None and op["voice"] != prev_voice:
                     parts.append(SEG_GAP)
+                parts.append(ENGINE.synth_chunk(op["text"], op["voice"], op["speed"]))
+                prev_voice = op["voice"]
+                done += 1
+                elapsed = time.time() - t0
+                rate = done / elapsed if elapsed > 0 else 0
+                eta = int((total_chunks - done) / rate) if rate > 0 else None
+                pct = 4 + int(done / total_chunks * 76)
+                progress(stage=f"Narrating: {ch['title']}", percent=pct,
+                         chapters_done=idx, chunks_done=done, eta=eta)
             audio = np.concatenate(parts) if parts else np.zeros(0, dtype="float32")
             wav_path = os.path.join(workdir, f"ch{idx:03d}.wav")
             sf.write(wav_path, audio, SAMPLE_RATE)
@@ -215,6 +265,7 @@ def run(job: dict, progress) -> dict:
     os.makedirs(out_base, exist_ok=True)
     formats = job.get("formats", ["m4b", "mp3"])
     cover = job.get("cover")
+    af = _loudnorm_af(job)          # louder, consistent output (or None)
 
     nch = len(chapter_wavs)
     if "mp3" in formats:
@@ -229,6 +280,8 @@ def run(job: dict, progress) -> dict:
             if cover:
                 args += ["-i", cover, "-map", "0:a", "-map", "1:v",
                          "-disposition:v", "attached_pic"]
+            if af:
+                args += ["-af", af]
             args += ["-c:a", "libmp3lame", "-q:a", "4",
                      "-metadata", f"title={cw['title']}",
                      "-metadata", f"track={i + 1}",
@@ -262,6 +315,8 @@ def run(job: dict, progress) -> dict:
         args += ["-map_metadata", "1", "-map_chapters", "1", "-map", "0:a"]
         if cover:
             args += ["-map", "2:v", "-disposition:v", "attached_pic", "-c:v", "mjpeg"]
+        if af:
+            args += ["-af", af]
         args += ["-c:a", "aac", "-b:a", "96k", m4b_path]
         _ffmpeg_progress(args, total_ms, progress, base=92, span=7,
                          stage="Building audiobook")

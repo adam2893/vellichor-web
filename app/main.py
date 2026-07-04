@@ -229,6 +229,7 @@ async def convert_endpoint(
     request: Request,
     voice: str = Form(...),
     speed: float = Form(1.0),
+    loudness: float = Form(-16.0),
     title: str = Form(""),
     author: str = Form("Vellichor"),
     formats: str = Form("m4b,mp3"),
@@ -298,6 +299,7 @@ async def convert_endpoint(
         "author": author or "Vellichor",
         "voice": voice,
         "speed": max(0.5, min(2.0, speed)),
+        "loudness": max(-24.0, min(0.0, loudness)),   # LUFS target; 0 = off
         "formats": [f for f in formats.split(",") if f in ("m4b", "mp3")] or ["m4b"],
         "export_abs": bool(export_abs),
         "cover": cover_path,
