@@ -655,6 +655,70 @@ $('#logoutBtn').addEventListener('click', async () => {
   await fetch('/api/logout', { method: 'POST' }); location.href = '/login';
 });
 
+// ---------- setting presets ----------
+let PRESETS = [];
+async function loadPresets() {
+  try { PRESETS = ((await (await fetch('/api/presets')).json()).presets) || []; }
+  catch (e) { PRESETS = []; }
+  const sel = $('#presetSelect');
+  sel.innerHTML = '<option value="">— saved presets —</option>';
+  for (const p of PRESETS) {
+    const o = document.createElement('option'); o.value = p.id; o.textContent = p.name;
+    sel.appendChild(o);
+  }
+}
+function gatherSettings() {
+  return {
+    engine: $('#engineSelect').value,
+    voice: selected,
+    speed: $('#speed').value,
+    exaggeration: $('#exag').value,
+    loudness: +$('#loud').value,             // slider index 0–3
+    ambience: $('#ambienceSelect').value,
+    ambience_volume: +$('#ambVol').value,
+    ducking: $('#ducking').checked,
+    reference_voice: selectedRef.type === 'myvoice' ? selectedRef.id : '',
+    multivoice: $('#multiVoice').checked,
+  };
+}
+function applySettings(s) {
+  if (!s) return;
+  if (s.engine) { $('#engineSelect').value = s.engine; updateEngineUI(); }
+  if (s.voice) { selectVoice(s.voice); renderVoices(); }
+  if (s.speed != null) { $('#speed').value = s.speed; $('#speedVal').textContent = (+s.speed).toFixed(2) + '×'; }
+  if (s.exaggeration != null) { $('#exag').value = s.exaggeration; $('#exagVal').textContent = (+s.exaggeration).toFixed(2); }
+  if (s.loudness != null) { $('#loud').value = s.loudness; $('#loudVal').textContent = LOUD_LABELS[+s.loudness] || 'Loud'; }
+  if (s.ambience != null) $('#ambienceSelect').value = s.ambience;
+  if (s.ambience_volume != null) { $('#ambVol').value = s.ambience_volume; $('#ambVolVal').textContent = s.ambience_volume + '%'; }
+  if (s.ducking != null) $('#ducking').checked = !!s.ducking;
+  if (s.multivoice != null) { $('#multiVoice').checked = !!s.multivoice; $('#castArea').hidden = !s.multivoice; }
+  selectedRef = s.reference_voice ? { type: 'myvoice', id: s.reference_voice } : { type: 'preset' };
+  $('#refChosen').textContent = '';
+  renderMyVoices();
+}
+$('#presetApply').addEventListener('click', () => {
+  const p = PRESETS.find(x => x.id === $('#presetSelect').value);
+  if (!p) { toast('Pick a preset', 'bad'); return; }
+  applySettings(p.settings); toast('Preset applied', 'good');
+});
+$('#presetSave').addEventListener('click', async () => {
+  const name = $('#presetName').value.trim();
+  if (!name) { toast('Name the preset first', 'bad'); return; }
+  const r = await fetch('/api/presets', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, settings: gatherSettings() }),
+  });
+  if (r.ok) { $('#presetName').value = ''; await loadPresets(); toast('Preset saved', 'good'); }
+  else toast('Could not save preset', 'bad');
+});
+$('#presetDel').addEventListener('click', async () => {
+  const id = $('#presetSelect').value;
+  if (!id) { toast('Pick a preset to delete', 'bad'); return; }
+  if (!confirm('Delete this preset?')) return;
+  await fetch('/api/presets/' + id, { method: 'DELETE' });
+  loadPresets();
+});
+
 // ---------- pronunciations ----------
 async function loadPron() {
   try { renderPron(((await (await fetch('/api/pronunciations')).json()).rules) || []); }
@@ -695,6 +759,7 @@ loadEngines();
 loadMyVoices();
 loadAmbience();
 loadPron();
+loadPresets();
 checkSmartcast();
 refreshJobs();
 setInterval(refreshJobs, 1500);

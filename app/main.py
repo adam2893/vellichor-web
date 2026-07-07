@@ -18,6 +18,7 @@ import ambience as amb
 import smartcast
 import engines
 import myvoices
+import presets
 import pronunciations as pron
 import convert
 import gpu
@@ -160,6 +161,29 @@ def pron_delete(frm: str):
     from urllib.parse import unquote
     if not pron.delete(unquote(frm)):
         raise HTTPException(404, "No such rule")
+    return {"ok": True}
+
+
+# ---- setting presets ----------------------------------------------------
+@app.get("/api/presets")
+def presets_list():
+    return {"presets": presets.list_all()}
+
+
+@app.post("/api/presets")
+async def presets_add(request: Request):
+    body = await request.json()
+    try:
+        rec = presets.save(body.get("name", ""), body.get("settings", {}))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return rec
+
+
+@app.delete("/api/presets/{pid}")
+def presets_delete(pid: str):
+    if not presets.delete(pid):
+        raise HTTPException(404, "No such preset")
     return {"ok": True}
 
 

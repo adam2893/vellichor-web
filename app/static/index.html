@@ -81,6 +81,17 @@ Write or paste your story here. Use # Heading lines to split it into chapters.">
     <aside class="panel settings">
       <h2>Settings</h2>
 
+      <label class="lbl">Preset</label>
+      <div class="preset-row">
+        <select id="presetSelect" class="field"><option value="">— saved presets —</option></select>
+        <button id="presetApply" class="ghost" type="button">Apply</button>
+        <button id="presetDel" class="ghost" type="button" title="Delete preset">✕</button>
+      </div>
+      <div class="preset-row">
+        <input id="presetName" class="field" placeholder="Save current settings as…" />
+        <button id="presetSave" class="ghost" type="button">Save</button>
+      </div>
+
       <label class="lbl">TTS engine</label>
       <select id="engineSelect" class="field"></select>
       <div id="engineBlurb" class="hint"></div>
