@@ -4,19 +4,34 @@ A self-hosted web app that turns your written stories (and ebooks) into
 narrated audiobooks. Fast by default with the **Kokoro-82M** TTS model, plus an
 optional **expressive engine (Chatterbox)** that adds emotional intensity and
 **voice cloning** — clone a voice from a short clip, or record your own right in
-the browser. GPU-accelerated and light enough to run on a modest card (originally
-built on a GTX 1080); falls back to CPU. Open source (MIT).
+the browser. GPU-accelerated and light enough to run on a modest card; falls
+back to CPU. Open source (MIT).
+
+### GPU Support
+
+| Backend | Vendor | Status |
+|---------|--------|--------|
+| **CUDA** | NVIDIA (GeForce, Quadro, Tesla) | ✅ Mature, recommended |
+| **OpenVINO / XPU** | Intel Arc A-series, Intel iGPU (Iris Xe, UHD) | ✅ Supported |
+| **Vulkan** | AMD Radeon, cross-vendor | ⚠️ Experimental |
+| **CPU** | Any | ✅ Always available |
 
 ## Requirements
 - **Docker** and **Docker Compose**.
-- **(Optional) NVIDIA GPU** for acceleration — requires the NVIDIA Container
-  Toolkit on the host (on Unraid, the **Nvidia Driver** plugin). With no GPU it
-  runs on CPU instead — see the no-GPU note in *Getting started*.
+- **GPU (optional):**
+  - **NVIDIA GPU** — requires the NVIDIA Container Toolkit on the host (Unraid:
+    **Nvidia Driver** plugin).
+  - **Intel Arc / iGPU** — requires Intel GPU drivers on the host + `/dev/dri`
+    passthrough.
+  - **AMD GPU** — requires AMDGPU drivers + Mesa Vulkan on the host.
+  With no GPU it runs on CPU instead — see the CPU-only note in *Getting started*.
 - **Disk:** ~7 GB for the Docker image, plus models downloaded on first use —
   Kokoro (small), the optional Ollama Smart-cast LLM (~2 GB), and the optional
   Chatterbox expressive model (~1–2 GB). Budget ~12 GB total to use everything.
 
 ## Getting started
+
+### NVIDIA (default)
 ```bash
 # 1. Clone
 git clone https://github.com/woodscode/vellichor-web.git
@@ -31,8 +46,7 @@ $EDITOR .env                       # set VELLICHOR_PASSWORD
 #    - Audiobookshelf export mount (…:/library) — repoint to your library, or
 #      remove the volume if you don't use Audiobookshelf
 #    - host port (default 7777:7777)
-#    - NO GPU? remove the `runtime: nvidia` and `NVIDIA_*` lines from BOTH
-#      services (it then runs on CPU — slower, but works)
+#    - NO GPU? set TORCH_BACKEND=cpu in .env and remove `runtime: nvidia` + `NVIDIA_*` lines
 
 # 4. Build & start
 docker compose up -d --build
@@ -41,7 +55,133 @@ docker compose up -d --build
 docker exec vellichor-ollama ollama pull llama3.2:3b
 ```
 Then open **http://<server-ip>:7777** and log in with your `VELLICHOR_PASSWORD`.
-Store that password in your password manager.
+
+### Intel Arc / iGPU (OpenVINO)
+
+Vellichor runs on Intel GPUs via two backends that share the card:
+- **Kokoro + Chatterbox (TTS)** → Intel IPEX / OpenVINO (`xpu` device)
+- **Ollama (Smart cast)** → Ollama's built-in Vulkan backend
+
+Both get full GPU acceleration. The 12 GB on an Arc B580 comfortably fits
+Kokoro (~2 GB) and the Smart cast LLM (~2 GB) with room to spare.
+
+#### Step 1 — Install Intel GPU drivers on the host
+
+**Ubuntu / Debian:**
+```bash
+# Add Intel's GPU package repository
+wget -qO - https://repositories.intel.com/gpu/intel-graphics.key | \
+  sudo gpg --dearmor --output /usr/share/keyrings/intel-graphics.gpg
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] \
+  https://repositories.intel.com/gpu/ubuntu jammy client" | \
+  sudo tee /etc/apt/sources.list.d/intel-gpu.list
+
+sudo apt update
+sudo apt install -y \
+  intel-opencl-icd intel-level-zero-gpu level-zero \
+  intel-media-va-driver-non-free libze1 libmfx1
+
+# Install Vulkan support (needed by Ollama)
+sudo apt install -y mesa-vulkan-drivers vulkan-tools
+
+# Verify the GPU is visible
+sudo intel_gpu_top          # should show your Arc card
+ls -la /dev/dri/renderD128  # must exist
+vulkaninfo --summary | grep -i "GPU"   # Vulkan device listing
+```
+
+**Other distros:** install the equivalent of `intel-compute-runtime`,
+`intel-level-zero-gpu`, `level-zero`, and `mesa-vulkan-drivers`.
+
+**Kernel:** 6.2+ recommended for Arc dGPUs (Battlemage B580 works from 6.8+).
+Check with `uname -r`.
+
+#### Step 2 — Set up render group permissions
+
+Docker containers access the GPU through `/dev/dri/renderD128`. Your user
+and the `ollama` process need membership in the `render` and `video` groups:
+
+```bash
+sudo usermod -aG render,video $USER
+# Check numeric group IDs (needed for docker-compose group_add)
+stat -c '%g %n' /dev/dri/renderD128
+stat -c '%g %n' /dev/dri/card0
+
+# Log out and back in for group changes to take effect
+```
+
+#### Step 3 — Build and start Vellichor
+
+```bash
+cd vellichor-web
+
+# Set the backend in .env
+echo "TORCH_BACKEND=openvino" >> .env
+
+# Build and start with the Arc profile
+docker compose -f docker-compose.yml -f docker-compose.arc.yml build
+docker compose -f docker-compose.yml -f docker-compose.arc.yml up -d
+
+# Pull the Smart cast LLM (uses Ollama's Vulkan backend on the Arc card)
+docker exec vellichor-ollama ollama pull llama3.2:3b
+```
+
+#### Step 4 — Confirm it's working
+
+```bash
+# Check that the backend activated correctly
+docker logs vellichor-web 2>&1 | grep -i "backends"
+# Expected: [backends] Activated: Intel OpenVINO / XPU (device=xpu)
+
+# Check the health endpoint (shows which backend is active)
+curl -s http://localhost:7777/healthz | python3 -m json.tool
+# Expected: {"ok": true, "device": "xpu", "backend": {"id": "openvino", ...}}
+
+# Verify Ollama sees the Vulkan GPU
+docker exec vellichor-ollama ollama ps
+docker exec vellichor-ollama ollama run llama3.2:3b "hello" --verbose 2>&1 | head -5
+# Look for "Vulkan" in the output — confirms GPU offload
+```
+
+The web UI header will show `🔷 Intel OpenVINO / XPU` instead of the `⚡ GPU`
+chip. Smart cast, live preview, voice cloning (Chatterbox), and multi-voice
+narration all work on the Intel GPU.
+
+**Troubleshooting:**
+- No `/dev/dri` → GPU drivers aren't installed or loaded. Check
+  `dmesg | grep -i i915` and `lspci | grep -i vga`.
+- Backend falls back to CPU → the render group isn't set on the Docker
+  user, or `intel-extension-for-pytorch` didn't find an XPU device.
+  Run `docker exec vellichor-web python3 -c "import torch; print(torch.xpu.is_available())"`.
+- Ollama runs on CPU → Vulkan drivers missing on the host. Install
+  `mesa-vulkan-drivers` and verify with `vulkaninfo`.
+- "Permission denied" on `/dev/dri` → check `group_add` numeric IDs in
+  `docker-compose.arc.yml` match your system's `stat` output.
+
+### AMD (Vulkan / ROCm)
+
+Set `TORCH_BACKEND=vulkan` in `.env`, then use the AMD profile:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.amd.yml build
+docker compose -f docker-compose.yml -f docker-compose.amd.yml up -d
+```
+
+**Host prerequisites:**
+- `amdgpu` kernel module + Mesa (`mesa-vulkan-drivers` for radeonsi)
+- `/dev/dri/renderD128` and `/dev/kfd` must exist
+- For better performance with ROCm (Radeon RX 6000+), replace the Dockerfile's
+  vulkan stage with a ROCm PyTorch build
+
+> ⚠️ **Vulkan note:** PyTorch's Vulkan backend is experimental. Some TTS ops may
+> fall back to CPU. For production AMD GPU use, consider building against ROCm
+> PyTorch wheels (`pytorch/pytorch:2.6.0-rocm6.2.4`).
+
+### CPU only
+```bash
+# Set TORCH_BACKEND=cpu in .env, or build directly:
+docker build --build-arg TORCH_BACKEND=cpu -t vellichor-web:cpu .
+# Then remove `runtime: nvidia` and `NVIDIA_*` from docker-compose.yml
+```
 
 ## Features
 - Built-in **story editor** (type/paste, `#` lines become chapters) + upload
