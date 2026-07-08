@@ -28,6 +28,10 @@ services:
       - "44"   # video group (or `render` group on newer distros — check `stat -c %g /dev/dri/renderD128`)
     # Intel GPUs expose via DRI; no NVIDIA container runtime needed
     # The `runtime:` override above clears the nvidia default
+    # seccomp:unconfined is needed because Intel IPEX .so files have execstack
+    # flags that Docker's default seccomp profile blocks.
+    security_opt:
+      - seccomp:unconfined
 
   ollama:
     # Ollama supports Intel GPUs via the Vulkan backend (added in v0.4+).

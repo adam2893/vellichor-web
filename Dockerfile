@@ -50,6 +50,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --retries 10 --timeout 300 \
     intel-extension-for-pytorch==2.6.10+xpu \
     --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/
+
+# Intel's IPEX .so files are compiled with execstack, which Docker + Unraid's
+# default seccomp profile blocks. Clear the execstack flag so IPEX loads
+# without needing --security-opt seccomp:unconfined.
+RUN apt-get update && apt-get install -y --no-install-recommends execstack \
+    && find /usr/local/lib -name 'libintel-ext-*.so' -exec execstack -c {} \; \
+    && apt-get purge -y execstack && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+
 # OpenVINO runtime for device detection / optional ONNX acceleration
 RUN pip install openvino==2025.2.0
 
