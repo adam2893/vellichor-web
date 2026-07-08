@@ -57,6 +57,11 @@ RUN pip install openvino==2025.2.0
 # NOTE: Intel IPEX libraries (libintel-ext-*.so) are compiled with execstack.
 # Docker's default seccomp profile blocks this, so Intel Arc containers need
 # --security-opt seccomp:unconfined in Extra Parameters / docker run / compose.
+#
+# Disable torch auto-loading IPEX — it causes a double triton namespace
+# registration inside IPEX's own binaries. Our backends.py imports IPEX
+# manually after setting up the CUDA shim, avoiding the conflict.
+ENV TORCH_DEVICE_BACKEND_AUTOLOAD=0
 
 # -----------------------------------------------------------------
 # Vulkan backend (AMD / cross-vendor) — experimental

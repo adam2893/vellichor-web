@@ -60,21 +60,13 @@ def _detect_cuda() -> bool:
 
 
 def _detect_openvino() -> bool:
-    """Intel Arc / iGPU available via IPEX (Intel Extension for PyTorch).
+    """Intel Arc / iGPU available via OpenVINO runtime.
 
-    IPEX registers ``torch.xpu`` and provides ``torch.xpu.is_available()``.
-    Also works when the host has the Intel GPU compute-runtime installed and
-    the Docker container has /dev/dri passed through.
+    Does NOT import IPEX here — that's done manually in activate() after
+    the CUDA shim is installed. With TORCH_DEVICE_BACKEND_AUTOLOAD=0 set,
+    torch won't auto-load IPEX; we want exactly one controlled import.
     """
-    try:
-        import intel_extension_for_pytorch as ipex  # noqa: F401
-        import torch
-        if hasattr(torch, "xpu") and torch.xpu.is_available():
-            return True
-    except Exception:
-        pass
-    # Fallback: check the OpenVINO runtime directly (device may be visible even
-    # without PyTorch XPU integration).
+    # Detect using OpenVINO runtime directly (no PyTorch/IPEX import needed)
     try:
         import openvino as ov
         core = ov.Core()
@@ -230,6 +222,16 @@ def activate(backend_id: Optional[str] = None):
         _ACTIVE = detect()
 
     _install_shim(_ACTIVE)
+
+    # When TORCH_DEVICE_BACKEND_AUTOLOAD=0 (set in Dockerfile), torch skips
+    # auto-loading device backends. We need to manually import IPEX after the
+    # CUDA shim is installed so the triton namespace is registered exactly
+    # once (IPEX's own registration, without torch's auto-load duplicating it).
+    if _ACTIVE.id == "openvino":
+        try:
+            import intel_extension_for_pytorch  # noqa: F401
+        except Exception as e:
+            print(f"[backends] Warning: IPEX import failed: {e}", flush=True)
 
     print(f"[backends] Activated: {_ACTIVE.label} (device={_ACTIVE.torch_device})",
           flush=True)
