@@ -1,22 +1,11 @@
 # Unraid (Community Applications)
 
-Two templates are provided:
-- **`vellichor-web.xml`** — NVIDIA GPU (default, CUDA)
-- **`vellichor-web-arc.xml`** — Intel Arc GPU (OpenVINO / IPEX)
+Two templates are available:
+- **NVIDIA GPU** → `vellichor-web.xml`
+- **Intel Arc GPU** → `vellichor-web-arc.xml`
 
-## Install it now (before it's in the CA store)
-
-On your Unraid box:
-
-1. **Docker** tab → **Add Container**.
-2. Set **Template** to the raw URL of the template for your GPU:
-   - NVIDIA: `https://raw.githubusercontent.com/woodscode/vellichor-web/main/unraid/vellichor-web.xml`
-   - Intel Arc: `https://raw.githubusercontent.com/woodscode/vellichor-web/main/unraid/vellichor-web-arc.xml`
-   …or paste the fields manually.
-3. Set **Login password** (and ideally **Secret key** = `openssl rand -hex 32`),
-   point **App data** at an appdata path, and **Audiobook library** at your
-   library share (or clear it).
-4. Apply, then browse to `http://<server-ip>:7777`.
+These XML files are for the Community Apps store (see "Getting into CA" below).
+Until they're published, set up the container manually — follow the guide for your GPU below.
 
 ---
 
@@ -24,132 +13,192 @@ On your Unraid box:
 
 ### Prerequisites
 
-Unraid 7.0+ ships with the `i915` kernel driver built in — your Arc card should
-be detected automatically.  Verify:
+Unraid 7.0+ ships with the `i915` kernel driver — your Arc card should be
+detected automatically.  Verify via SSH/terminal:
 
 ```bash
-# On your Unraid box (SSH or terminal):
 ls -la /dev/dri/renderD128       # must exist
 lspci | grep -i vga              # should list your Arc card
+uname -r                         # 6.6+ = good, 6.8+ for Battlemage B580
 ```
 
-**Install the Intel GPU Top plugin** from Community Apps — it gives you live
-GPU stats on the Unraid dashboard.
+Install the **Intel GPU Top** plugin from Community Apps (gives you GPU stats
+on the dashboard).  No other drivers needed.
 
-**No extra drivers needed.**  Unraid's kernel includes everything for Arc
-cards (Alchemist and Battlemage).
+### Step-by-step: Add Vellichor in the Unraid Docker GUI
 
-### Install Vellichor (Intel Arc template)
+Go to **Docker** tab → **Add Container**, then fill in these fields:
 
-1. **Docker tab** → **Add Container**
-2. **Template:** paste
-   `https://raw.githubusercontent.com/woodscode/vellichor-web/main/unraid/vellichor-web-arc.xml`
-3. Fill in the required fields:
-   - **Login password** — your web UI password
-   - **App data (/data)** — e.g. `/mnt/user/appdata/vellichor-arc/data`
-   - **GPU backend** — leave as `openvino`
-4. **Extra Parameters** should already be set to `--device=/dev/dri`
-   (this passes the Arc GPU through to the container)
-5. Click **Apply**
+**Basic settings:**
+| Field | Value |
+|-------|-------|
+| Name | `Vellichor-ARC` |
+| Repository | `ghcr.io/woodscode/vellichor-web:latest` |
+| Network Type | `Bridge` |
+| Console shell command | `Shell` |
 
-The container will start.  Open `http://<unraid-ip>:7777` — the header should
-show **🔷 Intel OpenVINO / XPU** confirming GPU acceleration is active.
+**Port mappings (Add):**
+| Container Port | Host Port |
+|---------------|-----------|
+| 7777 | 7777 |
+
+**Path mappings (Add):**
+| Container Path | Host Path | Access |
+|---------------|-----------|--------|
+| `/data` | `/mnt/user/appdata/vellichor-arc/data` | Read/Write |
+| `/library` | *(your Audiobookshelf library path, or leave empty)* | Read/Write |
+
+**Variables (Add):**
+| Key | Value | Notes |
+|-----|-------|-------|
+| `VELLICHOR_PASSWORD` | `your-password-here` | Web UI login |
+| `SECRET_KEY` | *(generate with `openssl rand -hex 32`)* | Session key, optional |
+| `VELLICHOR_GPU_BACKEND` | `openvino` | Tells Vellichor to use Intel GPU |
+| `ABS_UID` | `99` | File ownership for exports (Unraid nobody) |
+| `ABS_GID` | `100` | File ownership for exports (Unraid users) |
+
+**Extra Parameters (toggle Advanced View top-right to see this):**
+```
+--device=/dev/dri
+```
+
+That's it — no `--runtime=nvidia`, no NVIDIA variables.  Click **Apply**.
+
+Once running, browse to `http://<unraid-ip>:7777`.  The header should show
+**🔷 Intel OpenVINO / XPU** — that confirms GPU acceleration is working.
 
 ### Optional: Smart cast (AI speaker attribution) with Ollama
 
-Smart cast uses a separate Ollama container.  On Intel Arc, Ollama uses its
-**Vulkan backend** for GPU acceleration.
+Smart cast is the AI feature that reads your story and figures out who's
+speaking each line, then auto-assigns voices.  It needs a separate Ollama
+container running alongside Vellichor.
 
-**1. Install Ollama from Community Apps**, or set it up manually:
+**1. Add the Ollama container** (Docker tab → Add Container):
 
-- Docker tab → Add Container
-- **Name:** `ollama`
-- **Repository:** `ollama/ollama:latest`
-- **Extra Parameters:** `--device=/dev/dri --cap-add=CAP_PERFMON`
-- **Network Type:** bridge (or host)
-- Add a **Path:** `/mnt/user/appdata/ollama` → `/root/.ollama`
-- Add a **Port:** `11434` → `11434` (if using bridge mode)
-- Apply
+| Field | Value |
+|-------|-------|
+| Name | `ollama` |
+| Repository | `ollama/ollama:latest` |
+| Network Type | `Bridge` |
 
-**2. Pull the model** (after the container starts):
+| Container Port | Host Port |
+|---------------|-----------|
+| 11434 | 11434 |
 
+| Container Path | Host Path |
+|---------------|-----------|
+| `/root/.ollama` | `/mnt/user/appdata/ollama` |
+
+Extra Parameters:
+```
+--device=/dev/dri --cap-add=CAP_PERFMON
+```
+
+Click **Apply**.
+
+**2. Pull the model.**  After the container starts, open a terminal on Unraid:
 ```bash
 docker exec ollama ollama pull llama3.2:3b
 ```
 
-**3. Point Vellichor at Ollama.**  Edit the Vellichor container, set
-**Ollama URL** to `http://<unraid-ip>:11434` (use the host IP, not
-`localhost`, since they're separate containers).  Apply.
+**3. Point Vellichor at it.**  Edit the Vellichor container, add these variables:
 
-**4. Verify GPU offload** — after pulling the model, run a test:
+| Key | Value |
+|-----|-------|
+| `OLLAMA_URL` | `http://<unraid-ip>:11434` |
+| `SMARTCAST_MODEL` | `llama3.2:3b` |
 
-```bash
-docker logs ollama 2>&1 | grep -i vulkan
-# Looks for: "Vulkan" or "ggml_vulkan" — confirms GPU acceleration
-```
+Replace `<unraid-ip>` with your server's IP (e.g. `192.168.1.50`).
 
-> **Note:** If you have multiple GPUs (e.g. Intel iGPU + Arc dGPU), set
-> `GGML_VK_VISIBLE_DEVICES=0` (or `1`) as an Ollama environment variable
-> to pick the right one.
+Click **Apply**.  Smart cast will now use the Arc card's Vulkan backend via Ollama.
+
+> **Multiple GPUs?** If you have both an Intel iGPU and an Arc dGPU, add
+> `GGML_VK_VISIBLE_DEVICES=0` as an Ollama variable to pick the right one
+> (check `vulkaninfo --summary` to figure out which index is the dGPU).
 
 ### Without a GPU (CPU-only)
 
-1. Use the NVIDIA template and clear **Extra Parameters** (remove
-   `--runtime=nvidia`)
-2. Clear both `NVIDIA_VISIBLE_DEVICES` and `NVIDIA_DRIVER_CAPABILITIES`
-3. Or on the Arc template: set **GPU backend** to `cpu` and clear
-   **Extra Parameters**
-
-All features work on CPU — just slower.
+Same setup as above, but:
+- Set `VELLICHOR_GPU_BACKEND` to `cpu`
+- Clear **Extra Parameters** (leave empty)
+- Everything works, just slower.
 
 ---
 
-## AI Smart cast (optional) — NVIDIA
+## NVIDIA GPU setup
 
-Smart cast uses a local **Ollama** LLM to attribute dialogue to speakers. The
-Vellichor container does **not** include Ollama — you run it separately and
-point Vellichor at it. Without it, multi-voice casting falls back to the
-rule-based **Quick detect**, so this is entirely optional.
+### Prerequisites
 
-**1. Run an Ollama container.** Easiest on Unraid: install **Ollama** from
-Community Applications. Or from the command line:
-```bash
-docker run -d --name ollama --restart unless-stopped \
-  --runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=all \
-  -v /mnt/user/appdata/ollama:/root/.ollama \
-  -p 11434:11434 ollama/ollama
+Install the **Nvidia Driver** plugin from Community Apps.
+
+### Step-by-step: Add Vellichor (NVIDIA)
+
+Go to **Docker** tab → **Add Container**:
+
+**Basic settings:**
+| Field | Value |
+|-------|-------|
+| Name | `Vellichor` |
+| Repository | `ghcr.io/woodscode/vellichor-web:latest` |
+| Network Type | `Bridge` |
+
+| Container Port | Host Port |
+|---------------|-----------|
+| 7777 | 7777 |
+
+| Container Path | Host Path |
+|---------------|-----------|
+| `/data` | `/mnt/user/appdata/vellichor/data` |
+| `/library` | *(your Audiobookshelf library, or leave empty)* |
+
+**Variables:**
+| Key | Value |
+|-----|-------|
+| `VELLICHOR_PASSWORD` | `your-password` |
+| `SECRET_KEY` | *(generate: `openssl rand -hex 32`)* |
+| `NVIDIA_VISIBLE_DEVICES` | `all` |
+| `NVIDIA_DRIVER_CAPABILITIES` | `compute,utility` |
+
+**Extra Parameters:**
 ```
-Drop the `--runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=all` flags to run on CPU.
-
-> **Pascal GPUs (GTX 10-series, e.g. the 1080):** recent Ollama dropped the
-> Pascal CUDA build, so the model silently falls back to CPU. Pin a version
-> that still bundles it — use `ollama/ollama:0.30.11` instead of `ollama/ollama`.
-
-**2. Pull the model once** (use your Ollama container's name):
-```bash
-docker exec ollama ollama pull llama3.2:3b
+--runtime=nvidia
 ```
 
-**3. Point Vellichor at it:** set **Ollama URL** in the Vellichor template to
-`http://<unraid-ip>:11434` — use the host IP, not `localhost`, since they're
-separate containers.
+Click **Apply**.  Header shows `⚡ GPU`.
 
-On a single GPU, Vellichor hands VRAM back and forth between Kokoro and Ollama
-automatically (it evicts whichever model is idle before the other runs). This
-works across containers via Ollama's API, as long as the Ollama container also
-has GPU access.
+### Smart cast with Ollama (NVIDIA)
+
+Add an Ollama container:
+
+| Field | Value |
+|-------|-------|
+| Name | `ollama` |
+| Repository | `ollama/ollama:latest` |
+| Port | 11434 → 11434 |
+| Path | `/root/.ollama` → `/mnt/user/appdata/ollama` |
+
+Extra Parameters:
+```
+--runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=all
+```
+
+Pull model: `docker exec ollama ollama pull llama3.2:3b`
+
+Point Vellichor at it: add `OLLAMA_URL` = `http://<unraid-ip>:11434`
+
+> **GTX 10-series (Pascal)?** Recent Ollama dropped Pascal CUDA builds.
+> Use `ollama/ollama:0.30.11` as the repository instead of `:latest`.
 
 ---
 
-## Getting it into the Community Applications store
-1. Make the GHCR package **public**: GitHub repo → **Packages** →
-   `vellichor-web` → **Package settings** → change visibility to Public.
-2. Add an **icon**: drop a square PNG at `unraid/icon.png` in this repo (the
-   template's `<Icon>` already points there).
-3. Create a **support thread** on the Unraid forums (the template references
-   the GitHub issues page; CA prefers a forum support URL — update `<Support>`
-   if you make one).
-4. Submit the template repo to Community Applications via the official thread:
-   <https://forums.unraid.net/topic/38582-plug-in-community-applications/> —
-   follow "how to add your templates to CA". A moderator reviews it before it
-   appears in the store.
+## Getting the templates into Community Applications
+
+The XML files in this directory are CA store templates.  To get them into the
+store so people can one-click install:
+
+1. Make the GHCR package **public**: GitHub → Packages → `vellichor-web` →
+   Package settings → change visibility to Public
+2. Add an icon at `unraid/icon.png` (already done)
+3. Create a support thread on the Unraid forums
+4. Submit the repo to CA:
+   <https://forums.unraid.net/topic/38582-plug-in-community-applications/>
