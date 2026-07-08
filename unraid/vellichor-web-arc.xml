@@ -13,7 +13,7 @@
   <Category>MediaApp:Books Productivity:</Category>
   <WebUI>http://[IP]:[PORT:7777]/</WebUI>
   <Icon>https://raw.githubusercontent.com/adam2893/vellichor-web/main/unraid/icon.png</Icon>
-  <ExtraParams>--device=/dev/dri --security-opt seccomp:unconfined</ExtraParams>
+  <ExtraParams>--device=/dev/dri</ExtraParams>
   <PostArgs/>
   <DonateText/>
   <DonateLink/>

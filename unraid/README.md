@@ -59,13 +59,8 @@ Go to **Docker** tab → **Add Container**, then fill in these fields:
 
 **Extra Parameters (toggle Advanced View top-right to see this):**
 ```
---device=/dev/dri --security-opt seccomp:unconfined
+--device=/dev/dri
 ```
-
-> **Why seccomp:unconfined?** Intel's IPEX libraries are compiled with the
-> execstack flag, which Unraid's default Docker seccomp profile blocks. This
-> flag lifts that restriction. Future images (post commit a85c552) will have
-> execstack cleared at build time and won't need this.
 ```
 
 That's it — no `--runtime=nvidia`, no NVIDIA variables.  Click **Apply**.

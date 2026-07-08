@@ -178,6 +178,21 @@ def _install_shim(backend: Backend):
 
     torch.nn.Module.to = _shim_module_to
 
+    # ---- torch.Tensor.cuda / torch.nn.Module.cuda -----------------------
+    # Kokoro calls .cuda() directly (not just .to('cuda')), which only works
+    # with actual CUDA. Redirect it to .to(xpu/vulkan) instead.
+    _orig_tensor_cuda = torch.Tensor.cuda
+    _orig_module_cuda = torch.nn.Module.cuda
+
+    def _shim_tensor_cuda(self, device=None, non_blocking=False):
+        return _orig_tensor_to(self, target_device, non_blocking=non_blocking)
+
+    def _shim_module_cuda(self, device=None):
+        return _orig_module_to(self, target_device)
+
+    torch.Tensor.cuda = _shim_tensor_cuda
+    torch.nn.Module.cuda = _shim_module_cuda
+
     # ---- torch.cuda.empty_cache → no-op (backend handles its own memory) --
     _orig_empty_cache = torch.cuda.empty_cache
     torch.cuda.empty_cache = lambda: None
