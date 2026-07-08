@@ -16,6 +16,9 @@ back to CPU. Open source (MIT).
 | **Vulkan** | AMD Radeon, cross-vendor | ⚠️ Experimental |
 | **CPU** | Any | ✅ Always available |
 
+> **Unraid users:** skip to [`unraid/README.md`](unraid/README.md) for step-by-step
+> GUI setup with Docker templates for both NVIDIA and Intel Arc.
+
 ## Requirements
 - **Docker** and **Docker Compose**.
 - **GPU (optional):**

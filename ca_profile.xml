@@ -10,7 +10,11 @@ Self-hosted apps by **woodscode**.
 the [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) TTS model. Features
 multi-voice character casting (rule-based or AI Smart cast via Ollama), background
 ambience mixing, chaptered **M4B** + per-chapter **MP3** output, and auto-export to
-an Audiobookshelf library. Optional NVIDIA GPU acceleration; falls back to CPU.
+an Audiobookshelf library.
+
+**GPU support:** NVIDIA CUDA (mature), Intel Arc via OpenVINO/IPEX (supported),
+AMD via Vulkan (experimental). Falls back to CPU automatically.
+Two Unraid templates are included — pick the one for your GPU.
 
 For setup, configuration, and support, see the
 [project README](https://github.com/woodscode/vellichor-web) and

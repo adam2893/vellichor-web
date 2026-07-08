@@ -1,0 +1,49 @@
+# Intel Arc / iGPU profile — overrides the base docker-compose.yml.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.arc.yml build
+#   docker compose -f docker-compose.yml -f docker-compose.arc.yml up -d
+#
+# Prerequisites:
+#   - Intel GPU drivers on the host (intel-compute-runtime or i915 kernel driver)
+#   - /dev/dri must exist (renderD128 at minimum)
+#   - Host kernel 6.2+ recommended for Arc dGPUs
+
+services:
+  vellichor-web:
+    build:
+      args:
+        TORCH_BACKEND: openvino
+    # Intel GPU passthrough via DRI — no NVIDIA runtime needed
+    runtime: ""
+    environment:
+      # Clear NVIDIA-specific env vars from the base compose
+      NVIDIA_VISIBLE_DEVICES: ""
+      NVIDIA_DRIVER_CAPABILITIES: ""
+      # Tell Vellichor to prefer OpenVINO
+      VELLICHOR_GPU_BACKEND: openvino
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "44"   # video group (or `render` group on newer distros — check `stat -c %g /dev/dri/renderD128`)
+    # Intel GPUs expose via DRI; no NVIDIA container runtime needed
+    # The `runtime:` override above clears the nvidia default
+
+  ollama:
+    # Ollama supports Intel GPUs via the Vulkan backend (added in v0.4+).
+    # The container needs /dev/dri for GPU access and the render/video groups.
+    # CAP_PERFMON lets Ollama read VRAM usage for scheduling.
+    image: ollama/ollama:latest
+    runtime: ""
+    cap_add:
+      - CAP_PERFMON
+    environment:
+      NVIDIA_VISIBLE_DEVICES: ""
+      NVIDIA_DRIVER_CAPABILITIES: ""
+      # If you have multiple GPUs, limit to the Arc card:
+      # GGML_VK_VISIBLE_DEVICES: "0"
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "44"   # video
+      - "109"  # render (check `stat -c %g /dev/dri/renderD128` on your system)

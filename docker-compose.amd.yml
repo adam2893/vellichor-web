@@ -1,0 +1,54 @@
+# AMD GPU profile (Vulkan / ROCm) — overrides the base docker-compose.yml.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.amd.yml build
+#   docker compose -f docker-compose.yml -f docker-compose.amd.yml up -d
+#
+# Prerequisites:
+#   - AMD GPU drivers (amdgpu kernel module) + Mesa for Vulkan
+#   - /dev/dri and /dev/kfd must exist
+#   - For ROCm (better performance, recommended for Radeon RX / Instinct):
+#     install rocm-dkms on the host and use the rocm PyTorch build instead
+#   - Vulkan: install mesa-vulkan-drivers (radeonsi) on the host
+
+services:
+  vellichor-web:
+    build:
+      args:
+        TORCH_BACKEND: vulkan
+    # AMD GPU passthrough via DRI + KFD
+    runtime: ""
+    environment:
+      # Clear NVIDIA-specific env vars
+      NVIDIA_VISIBLE_DEVICES: ""
+      NVIDIA_DRIVER_CAPABILITIES: ""
+      # Tell Vellichor to prefer Vulkan
+      VELLICHOR_GPU_BACKEND: vulkan
+    devices:
+      - /dev/dri:/dev/dri
+      - /dev/kfd:/dev/kfd
+    group_add:
+      - "44"   # video
+      - "109"  # render (check `stat -c %g /dev/dri/renderD128` on your system)
+    security_opt:
+      - seccomp:unconfined   # needed for AMD KFD ioctls in some setups
+    # NOTE: Vulkan PyTorch backend is experimental.  For production AMD GPU
+    # acceleration, rebuild this image with TORCH_BACKEND set to a ROCm wheel:
+    #   docker build --build-arg TORCH_BACKEND=vulkan -t vellichor-web:amd .
+    # (If you have ROCm on the host, replace the Dockerfile's openvino stage
+    #  with a rocm stage pulling from pytorch/pytorch:2.6.0-rocm6.2.4.)
+
+  ollama:
+    # Ollama supports AMD GPUs via ROCm. If you have ROCm installed on the host,
+    # use the ROCm Ollama image instead.  Otherwise the Ollama model runs on CPU.
+    # For ROCm Ollama support:
+    #   image: ollama/ollama:0.6.2-rocm
+    #   devices: [/dev/dri:/dev/dri, /dev/kfd:/dev/kfd]
+    #   group_add: ["44", "109"]
+    runtime: ""
+    environment:
+      NVIDIA_VISIBLE_DEVICES: ""
+      NVIDIA_DRIVER_CAPABILITIES: ""
+    devices:
+      - /dev/dri:/dev/dri
+      - /dev/kfd:/dev/kfd

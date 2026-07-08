@@ -22,6 +22,7 @@ import presets
 import pronunciations as pron
 import convert
 import gpu
+import backends
 from tts import ENGINE
 from jobs import MANAGER
 
@@ -90,8 +91,10 @@ def logout():
 # ---- voices -------------------------------------------------------------
 @app.get("/api/voices")
 def list_voices():
+    be = backends.current()
     return {"voices": voicecat.VOICES, "default": voicecat.DEFAULT_VOICE,
-            "device": ENGINE.device}
+            "device": ENGINE.device,
+            "backend": {"id": be.id, "label": be.label, "icon": be.icon}}
 
 
 @app.get("/api/engines")
@@ -498,7 +501,9 @@ def download(jid: str, name: str):
 
 @app.get("/healthz")
 def health():
-    return {"ok": True, "device": ENGINE.device}
+    be = backends.current()
+    return {"ok": True, "device": ENGINE.device,
+            "backend": {"id": be.id, "label": be.label}}
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

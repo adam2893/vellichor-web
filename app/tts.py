@@ -18,10 +18,15 @@ class Engine:
         self._lock = threading.Lock()
         self.device = "cpu"
         try:
-            import torch
-            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+            import backends
+            backend = backends.current()
+            self.device = backend.torch_device
         except Exception:
-            pass
+            try:
+                import torch
+                self.device = "cuda" if torch.cuda.is_available() else "cpu"
+            except Exception:
+                pass
         os.makedirs(SAMPLES_DIR, exist_ok=True)
 
     def pipeline(self, lang_code: str):
@@ -40,9 +45,13 @@ class Engine:
         try:
             import gc
             import torch
+            import backends
             gc.collect()
-            if torch.cuda.is_available():
+            be = backends.current()
+            if be.id == "cuda" and torch.cuda.is_available():
                 torch.cuda.empty_cache()
+            elif hasattr(torch, "xpu") and hasattr(torch.xpu, "empty_cache"):
+                torch.xpu.empty_cache()
         except Exception:  # noqa: BLE001
             pass
 

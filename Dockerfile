@@ -1,4 +1,14 @@
-FROM python:3.11-slim
+# Vellichor — Multi-backend Docker image
+#
+# Build for your GPU vendor:
+#   docker build -t vellichor-web:latest .                        # NVIDIA CUDA (default)
+#   docker build --build-arg TORCH_BACKEND=openvino -t vellichor-web:arc .   # Intel Arc
+#   docker build --build-arg TORCH_BACKEND=vulkan  -t vellichor-web:amd .    # AMD / Vulkan
+#   docker build --build-arg TORCH_BACKEND=cpu     -t vellichor-web:cpu .    # CPU only
+
+ARG TORCH_BACKEND=cuda
+
+FROM python:3.11-slim AS base
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=1 \
@@ -14,11 +24,56 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+# -----------------------------------------------------------------
+# CUDA backend (NVIDIA) — default
+# -----------------------------------------------------------------
+FROM base AS cuda
 # CUDA 12.4 PyTorch — still supports the GTX 1080 (Pascal, sm_61). Pinned to
-# 2.6.0 to satisfy chatterbox-tts's exact torch pin; Pascal was only dropped from
-# the CUDA 12.8 builds of torch 2.8+, so 2.6.0+cu124 keeps the 1080 working.
+# 2.6.0 to satisfy chatterbox-tts's exact torch pin.
 RUN pip install --retries 10 --timeout 300 torch==2.6.0 torchaudio==2.6.0 \
     --index-url https://download.pytorch.org/whl/cu124
+
+# -----------------------------------------------------------------
+# OpenVINO backend (Intel Arc / iGPU)
+# -----------------------------------------------------------------
+FROM base AS openvino
+# Standard CPU PyTorch first, then Intel Extension for PyTorch (IPEX) which
+# registers the 'xpu' device and accelerates models on Intel GPUs.
+RUN pip install --retries 10 --timeout 300 torch==2.6.0 torchaudio==2.6.0 \
+    --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --retries 10 --timeout 300 \
+    intel-extension-for-pytorch==2.6.0 \
+    oneccl_bind_pt==2.6.0 \
+    --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/
+# OpenVINO runtime for device detection / optional ONNX acceleration
+RUN pip install openvino==2025.2.0
+
+# -----------------------------------------------------------------
+# Vulkan backend (AMD / cross-vendor) — experimental
+# -----------------------------------------------------------------
+FROM base AS vulkan
+# Vulkan compute: needs libvulkan1, Mesa Vulkan drivers (radeonsi for AMD,
+# intel for Arc), and a PyTorch build with USE_VULKAN.  Stock pip wheels
+# don't ship with Vulkan; we install the standard CPU wheel and attempt to
+# enable Vulkan at runtime via PyTorch's dynamic backend loading.
+# For true Vulkan acceleration, rebuild PyTorch from source with USE_VULKAN=1.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libvulkan1 mesa-vulkan-drivers vulkan-tools \
+    && rm -rf /var/lib/apt/lists/*
+RUN pip install --retries 10 --timeout 300 torch==2.6.0 torchaudio==2.6.0 \
+    --index-url https://download.pytorch.org/whl/cpu
+
+# -----------------------------------------------------------------
+# CPU-only fallback
+# -----------------------------------------------------------------
+FROM base AS cpu
+RUN pip install --retries 10 --timeout 300 torch==2.6.0 torchaudio==2.6.0 \
+    --index-url https://download.pytorch.org/whl/cpu
+
+# -----------------------------------------------------------------
+# Final stage — pick the selected backend
+# -----------------------------------------------------------------
+FROM ${TORCH_BACKEND} AS final
 
 COPY requirements.txt .
 RUN pip install -r requirements.txt

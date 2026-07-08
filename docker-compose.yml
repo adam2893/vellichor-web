@@ -1,6 +1,9 @@
 services:
   vellichor-web:
-    build: .
+    build:
+      context: .
+      args:
+        TORCH_BACKEND: "${TORCH_BACKEND:-cuda}"
     image: vellichor-web:latest
     container_name: vellichor-web
     restart: unless-stopped
