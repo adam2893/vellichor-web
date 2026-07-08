@@ -51,17 +51,12 @@ RUN pip install --retries 10 --timeout 300 \
     intel-extension-for-pytorch==2.6.10+xpu \
     --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/
 
-# Intel's IPEX .so files are compiled with execstack, which Docker + Unraid's
-# default seccomp profile blocks. Clear the execstack flag so IPEX loads
-# without needing --security-opt seccomp:unconfined.
-# binutils provides the execstack tool; libintel-ext-pt-cpu.so is the main binary.
-RUN apt-get update && apt-get install -y --no-install-recommends binutils \
-    && find /usr/local/lib/python3.11/site-packages -name 'libintel-ext-*.so' \
-       -exec execstack -c {} \; \
-    && rm -rf /var/lib/apt/lists/*
-
 # OpenVINO runtime for device detection / optional ONNX acceleration
 RUN pip install openvino==2025.2.0
+
+# NOTE: Intel IPEX libraries (libintel-ext-*.so) are compiled with execstack.
+# Docker's default seccomp profile blocks this, so Intel Arc containers need
+# --security-opt seccomp:unconfined in Extra Parameters / docker run / compose.
 
 # -----------------------------------------------------------------
 # Vulkan backend (AMD / cross-vendor) — experimental
