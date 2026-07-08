@@ -54,9 +54,10 @@ RUN pip install --retries 10 --timeout 300 \
 # Intel's IPEX .so files are compiled with execstack, which Docker + Unraid's
 # default seccomp profile blocks. Clear the execstack flag so IPEX loads
 # without needing --security-opt seccomp:unconfined.
-RUN apt-get update && apt-get install -y --no-install-recommends execstack \
-    && find /usr/local/lib -name 'libintel-ext-*.so' -exec execstack -c {} \; \
-    && apt-get purge -y execstack && apt-get autoremove -y \
+# binutils provides the execstack tool; libintel-ext-pt-cpu.so is the main binary.
+RUN apt-get update && apt-get install -y --no-install-recommends binutils \
+    && find /usr/local/lib/python3.11/site-packages -name 'libintel-ext-*.so' \
+       -exec execstack -c {} \; \
     && rm -rf /var/lib/apt/lists/*
 
 # OpenVINO runtime for device detection / optional ONNX acceleration
