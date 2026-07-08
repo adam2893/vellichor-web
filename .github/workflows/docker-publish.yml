@@ -1,9 +1,13 @@
-name: Publish Docker image
+name: Publish Docker images
 
-# Build the image and push it to GitHub Container Registry (GHCR) on every push
-# to main and on version tags (v1.2.3). The package appears at
-# ghcr.io/woodscode/vellichor-web. Make the package "Public" once (in the repo's
-# Packages settings) so Unraid users can pull it without authenticating.
+# Build and push multi-backend images to GHCR on push to main / tags.
+# Produces:
+#   ghcr.io/$OWNER/vellichor-web:cuda      — NVIDIA (default build)
+#   ghcr.io/$OWNER/vellichor-web:arc       — Intel Arc (OpenVINO/IPEX)
+#   ghcr.io/$OWNER/vellichor-web:latest    — alias for cuda
+#
+# Make the package "Public" in repo → Packages settings so Unraid/Docker
+# users can pull without authenticating.
 
 on:
   push:
@@ -18,6 +22,17 @@ permissions:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - backend: cuda
+            tag_suffix: cuda
+            build_args: TORCH_BACKEND=cuda
+          - backend: openvino
+            tag_suffix: arc
+            build_args: TORCH_BACKEND=openvino
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,24 +47,41 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Image metadata (tags + labels)
+      - name: Image metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=ref,event=tag
-            type=sha,format=short
+            type=raw,value=${{ matrix.tag_suffix }},enable=true
 
-      - name: Build and push
+      - name: Build and push (${{ matrix.backend }})
         uses: docker/build-push-action@v6
         with:
           context: .
-          # Pascal/CUDA torch build is amd64-only; the GTX-1080-class target is x86.
           platforms: linux/amd64
           push: true
+          build-args: ${{ matrix.build_args }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.backend }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.backend }}
+
+  # After both build, tag cuda as :latest so existing users get the NVIDIA build
+  tag-latest:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull and re-tag cuda → latest
+        run: |
+          IMAGE="ghcr.io/${{ github.repository }}"
+          docker pull "${IMAGE}:cuda"
+          docker tag "${IMAGE}:cuda" "${IMAGE}:latest"
+          docker push "${IMAGE}:latest"

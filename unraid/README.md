@@ -33,7 +33,7 @@ Go to **Docker** tab → **Add Container**, then fill in these fields:
 | Field | Value |
 |-------|-------|
 | Name | `Vellichor-ARC` |
-| Repository | `ghcr.io/woodscode/vellichor-web:latest` |
+| Repository | `ghcr.io/adam2893/vellichor-web:arc` |
 | Network Type | `Bridge` |
 | Console shell command | `Shell` |
 
@@ -139,7 +139,7 @@ Go to **Docker** tab → **Add Container**:
 | Field | Value |
 |-------|-------|
 | Name | `Vellichor` |
-| Repository | `ghcr.io/woodscode/vellichor-web:latest` |
+| Repository | `ghcr.io/adam2893/vellichor-web:latest` |
 | Network Type | `Bridge` |
 
 | Container Port | Host Port |

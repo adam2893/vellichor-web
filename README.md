@@ -37,7 +37,7 @@ back to CPU. Open source (MIT).
 ### NVIDIA (default)
 ```bash
 # 1. Clone
-git clone https://github.com/woodscode/vellichor-web.git
+git clone https://github.com/adam2893/vellichor-web.git
 cd vellichor-web
 
 # 2. Create your .env: set a login password and a cookie-signing key
