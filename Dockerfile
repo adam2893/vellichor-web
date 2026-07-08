@@ -42,11 +42,12 @@ FROM base AS openvino
 # CPU wheels don't have. IPEX layers Intel-specific optimizations on top.
 # All packages must come from the Intel index or ABI mismatches break XPU.
 #
-# System deps: Intel GPU user-space libraries (libze1 = Level Zero loader,
-# intel-level-zero-gpu = compute runtime). Without these, IPEX can see the
-# device but can't submit work to it.
+# System deps: libze1 provides the Level Zero loader (libze_loader.so) that
+# IPEX needs to initialize and discover the GPU through /dev/dri. The actual
+# compute runtime (intel-level-zero-gpu) lives on the HOST — the container
+# talks to the GPU via the DRI device nodes, not through in-container drivers.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libze1 intel-level-zero-gpu level-zero intel-opencl-icd \
+        libze1 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --retries 10 --timeout 300 \
