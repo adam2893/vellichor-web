@@ -37,11 +37,21 @@ RUN pip install --retries 10 --timeout 300 torch==2.6.0 torchaudio==2.6.0 \
 # OpenVINO backend (Intel Arc / iGPU)
 # -----------------------------------------------------------------
 FROM base AS openvino
-# Standard CPU PyTorch first, then Intel Extension for PyTorch (IPEX) which
-# registers the 'xpu' device and accelerates models on Intel GPUs.
-RUN pip install --retries 10 --timeout 300 torch==2.6.0 torchaudio==2.6.0 \
-    --index-url https://download.pytorch.org/whl/cpu
+# Intel PyTorch with XPU (GPU) support baked in. The +cxx11.abi variant from
+# Intel's extension index includes XPU device support that standard PyTorch
+# CPU wheels don't have. IPEX layers Intel-specific optimizations on top.
+# All packages must come from the Intel index or ABI mismatches break XPU.
+#
+# System deps: Intel GPU user-space libraries (libze1 = Level Zero loader,
+# intel-level-zero-gpu = compute runtime). Without these, IPEX can see the
+# device but can't submit work to it.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libze1 intel-level-zero-gpu level-zero intel-opencl-icd \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --retries 10 --timeout 300 \
+    torch==2.6.0+cxx11.abi \
+    torchaudio==2.6.0+cxx11.abi \
     intel-extension-for-pytorch==2.6.0 \
     oneccl_bind_pt==2.6.0 \
     --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/
