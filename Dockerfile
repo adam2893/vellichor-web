@@ -53,11 +53,6 @@ RUN pip install --retries 10 --timeout 300 \
 # OpenVINO runtime for device detection / optional ONNX acceleration
 RUN pip install openvino==2025.2.0
 
-# IPEX bundles its own triton; kokoro's deps pull a standalone triton which
-# triggers a duplicate TORCH_LIBRARY namespace registration. This env var
-# tells triton not to register its own TORCH_LIBRARY, letting IPEX own it.
-ENV TRITON_DISABLE_TORCH_LIBRARY=1
-
 # -----------------------------------------------------------------
 # Vulkan backend (AMD / cross-vendor) — experimental
 # -----------------------------------------------------------------
@@ -87,6 +82,12 @@ FROM ${TORCH_BACKEND} AS final
 
 COPY requirements.txt .
 RUN pip install -r requirements.txt
+
+# kokoro depends on the standalone triton package, but both CUDA torch and IPEX
+# already include triton internally. Having both causes a double TORCH_LIBRARY
+# registration crash ("Only a single TORCH_LIBRARY can be used to register the
+# namespace triton"). Remove the standalone package — the bundled one suffices.
+RUN pip uninstall -y triton 2>/dev/null || true
 
 COPY app/ /app/
 
