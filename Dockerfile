@@ -53,6 +53,11 @@ RUN pip install --retries 10 --timeout 300 \
 # OpenVINO runtime for device detection / optional ONNX acceleration
 RUN pip install openvino==2025.2.0
 
+# IPEX bundles its own triton; kokoro's deps pull a standalone triton which
+# triggers a duplicate TORCH_LIBRARY namespace registration. This env var
+# tells triton not to register its own TORCH_LIBRARY, letting IPEX own it.
+ENV TRITON_DISABLE_TORCH_LIBRARY=1
+
 # -----------------------------------------------------------------
 # Vulkan backend (AMD / cross-vendor) — experimental
 # -----------------------------------------------------------------
