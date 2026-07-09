@@ -2,7 +2,8 @@
 
 Vellichor supports four backends, detected in priority order:
   cuda    – NVIDIA GPUs via CUDA (existing, mature)
-  openvino – Intel Arc / iGPU via Intel Extension for PyTorch (IPEX) + OpenVINO
+# backends.py
+  openvino – Intel Arc / iGPU via native PyTorch XPU + OpenVINO
   vulkan  – AMD / cross-vendor GPUs via PyTorch's Vulkan backend (experimental)
   cpu     – fallback
 
@@ -60,13 +61,12 @@ def _detect_cuda() -> bool:
 
 
 def _detect_openvino() -> bool:
-    """Intel Arc / iGPU available via OpenVINO runtime.
+    """Intel Arc / iGPU available via OpenVINO runtime device query.
 
-    Does NOT import IPEX here — that's done manually in activate() after
-    the CUDA shim is installed. With TORCH_DEVICE_BACKEND_AUTOLOAD=0 set,
-    torch won't auto-load IPEX; we want exactly one controlled import.
+    Uses OpenVINO's Core to check for GPU devices through /dev/dri — this
+    works independently of PyTorch, so detection succeeds even before any
+    model loads.
     """
-    # Detect using OpenVINO runtime directly (no PyTorch/IPEX import needed)
     try:
         import openvino as ov
         core = ov.Core()
@@ -237,16 +237,6 @@ def activate(backend_id: Optional[str] = None):
         _ACTIVE = detect()
 
     _install_shim(_ACTIVE)
-
-    # When TORCH_DEVICE_BACKEND_AUTOLOAD=0 (set in Dockerfile), torch skips
-    # auto-loading device backends. We need to manually import IPEX after the
-    # CUDA shim is installed so the triton namespace is registered exactly
-    # once (IPEX's own registration, without torch's auto-load duplicating it).
-    if _ACTIVE.id == "openvino":
-        try:
-            import intel_extension_for_pytorch  # noqa: F401
-        except Exception as e:
-            print(f"[backends] Warning: IPEX import failed: {e}", flush=True)
 
     print(f"[backends] Activated: {_ACTIVE.label} (device={_ACTIVE.torch_device})",
           flush=True)

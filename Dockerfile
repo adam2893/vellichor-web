@@ -37,38 +37,23 @@ RUN pip install --retries 10 --timeout 300 torch==2.6.0 torchaudio==2.6.0 \
 # OpenVINO backend (Intel Arc / iGPU)
 # -----------------------------------------------------------------
 FROM base AS openvino
-# IPEX 2.6.10+xpu pulls the correct torch from its dependency chain and
-# registers the 'xpu' device. No separate torch install needed — installing
-# torch first from any other index would shadow IPEX's own torch and break XPU.
+# PyTorch 2.5+ has native Intel GPU support (torch.xpu device). The +cxx11.abi
+# wheel from Intel's index includes XPU compiled in. No IPEX needed — simpler,
+# no ABI mismatch, no execstack issues.
 #
-# libze1 provides the Level Zero loader that IPEX uses to talk to the GPU
-# through /dev/dri. The actual compute runtime lives on the HOST.
+# libze1 provides the Level Zero loader that PyTorch XPU uses to talk to the
+# GPU through /dev/dri. The actual compute runtime lives on the HOST.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libze1 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --retries 10 --timeout 300 \
-    intel-extension-for-pytorch==2.6.10+xpu \
+    torch==2.5.1+cxx11.abi \
+    torchaudio==2.5.1+cxx11.abi \
     --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/
 
 # OpenVINO runtime for device detection / optional ONNX acceleration
 RUN pip install openvino==2025.2.0
-
-# IPEX .so files have the execstack flag set. glibc 2.41+ (Debian Trixie)
-# refuses to dlopen() libraries with executable stacks — this is the root
-# cause of "cannot enable executable stack as shared object requires".
-# patchelf --clear-execstack fixes it (not execstack, which was removed
-# from binutils and can't handle this ELF's section ordering anyway).
-# Ref: github.com/intel/intel-extension-for-pytorch/issues/794
-RUN apt-get update && apt-get install -y --no-install-recommends patchelf \
-    && patchelf --clear-execstack \
-       /usr/local/lib/python3.11/site-packages/intel_extension_for_pytorch/lib/libintel-ext-pt-cpu.so \
-    && rm -rf /var/lib/apt/lists/*
-
-# Disable torch auto-loading IPEX — it causes a double triton namespace
-# registration. Our backends.py imports IPEX manually once, after the CUDA
-# shim is installed, so triton registers exactly once.
-ENV TORCH_DEVICE_BACKEND_AUTOLOAD=0
 
 # -----------------------------------------------------------------
 # Vulkan backend (AMD / cross-vendor) — experimental
