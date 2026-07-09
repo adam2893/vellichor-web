@@ -258,7 +258,7 @@ def run(job: dict, progress) -> dict:
     for ch in chapters:
         if ch.get("heading") and ch["title"].strip():
             head = ch["title"].strip()
-            if head[-1] not in ".!?:;,"
+            if head[-1] not in ".!?:;,":
                 head += "."          # give the narrator a natural sentence beat
             ch["spoken_title"] = head
 
