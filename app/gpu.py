@@ -47,6 +47,9 @@ def empty_gpu_cache():
         be = backends.current()
         if be.id == "cuda" and torch.cuda.is_available():
             torch.cuda.empty_cache()
+        elif be.id == "openvino" and hasattr(torch, "xpu") and hasattr(torch.xpu, "empty_cache"):
+            torch.xpu.empty_cache()
+            print("[gpu] XPU cache emptied", flush=True)
         elif hasattr(torch, "xpu") and hasattr(torch.xpu, "empty_cache"):
             torch.xpu.empty_cache()
     except Exception:

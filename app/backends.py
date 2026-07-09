@@ -127,28 +127,53 @@ def current() -> Backend:
 # Model movement helper — move loaded models to the real GPU
 # ---------------------------------------------------------------------------
 
-def move_to_device(obj: object, device: str) -> None:
+def move_to_device(obj: object, device: str) -> int:
     """Recursively move every torch.nn.Module in *obj* to *device*.
 
-    After a library like Kokoro loads a model on CPU (because it can't
+    After a library like Kokoro loads a model on CPU (because it can\'t
     detect XPU/Vulkan), call this once to shift everything to the GPU.
     Only handles attributes of *obj* — does NOT walk global state.
+
+    Returns the number of modules successfully moved.
     """
     import torch
 
-    def _walk(o):
+    moved = 0
+    visited = set()
+
+    def _walk(o, path="obj"):
+        nonlocal moved
+        obj_id = id(o)
+        if obj_id in visited:
+            return
+        visited.add(obj_id)
+
         if isinstance(o, torch.nn.Module):
             try:
+                current_device = None
+                try:
+                    p = next(o.parameters(), None)
+                    if p is not None:
+                        current_device = str(p.device)
+                except Exception:
+                    pass
                 o.to(device)
-            except Exception:
-                pass
-            for child in o.children():
-                _walk(child)
+                moved += 1
+                print(f"[backends] Moved {path} ({type(o).__name__}) to {device} (was {current_device})", flush=True)
+            except Exception as e:
+                print(f"[backends] Failed to move {path} to {device}: {e}", flush=True)
+            for name, child in o.named_children():
+                _walk(child, f"{path}.{name}")
         elif isinstance(o, dict):
-            for v in o.values():
-                _walk(v)
-        elif isinstance(o, (list, tuple, set)):
-            for item in o:
-                _walk(item)
+            for k, v in o.items():
+                _walk(v, f"{path}[{k!r}]")
+        elif isinstance(o, (list, tuple)):
+            for i, item in enumerate(o):
+                _walk(item, f"{path}[{i}]")
+        elif hasattr(o, "__dict__"):
+            for k, v in o.__dict__.items():
+                _walk(v, f"{path}.{k}")
 
-    _walk(obj.__dict__ if hasattr(obj, "__dict__") else obj)
+    _walk(obj)
+    print(f"[backends] move_to_device: moved {moved} module(s) to {device}", flush=True)
+    return moved

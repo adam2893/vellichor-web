@@ -28,6 +28,8 @@ class Cancelled(Exception):
 LIBRARY_DIR = "/library"           # bind-mounted Audiobookshelf library
 ABS_UID = int(os.environ.get("ABS_UID", "911"))
 ABS_GID = int(os.environ.get("ABS_GID", "911"))
+
+
 def _silence(seconds: float) -> np.ndarray:
     return np.zeros(int(SAMPLE_RATE * max(0.0, seconds)), dtype="float32")
 
@@ -107,7 +109,7 @@ def _plan_chapter(ch, multivoice, narrator_voice, cast_map, base_speed, base_exa
     """Return an ordered op list for one chapter. Each op is either
     {"kind":"speak", voice, text, speed, exaggeration} or {"kind":"pause", seconds}.
 
-    Inline directives become ops: [pause]→silence, [slow]→speed, [calm]/[excited]→
+    Inline directives become ops: [pause]->silence, [slow]->speed, [calm]/[excited]->
     expressiveness (Chatterbox). A chapter title (when present) is read first,
     followed by a beat before the body begins."""
     ops = []
@@ -181,7 +183,7 @@ def _prepare_reference(src: str, workdir: str) -> str:
 
 def _resolve_reference(job: dict, voice: str, workdir: str) -> str:
     """Pick the Chatterbox cloning reference, in priority order:
-    a one-off uploaded/recorded clip → a saved 'My Voice' → else a Kokoro-rendered
+    a one-off uploaded/recorded clip -> a saved 'My Voice' -> else a Kokoro-rendered
     sample of the selected preset voice."""
     one_off = job.get("reference_path")
     if one_off and os.path.exists(one_off):
@@ -238,7 +240,7 @@ def run(job: dict, progress) -> dict:
     cast_map = job.get("cast") or {}
 
     # ---- 1. Extract chapters --------------------------------------------
-    progress(stage="Reading text", percent=2, log="Extracting chapters…")
+    progress(stage="Reading text", percent=2, log="Extracting chapters...")
     if job.get("source"):
         chapters, detected_title = extractor.extract(job["source"])
     else:
@@ -252,11 +254,11 @@ def run(job: dict, progress) -> dict:
 
     # Read each chapter's heading aloud as the opening of its narration (so the
     # title is part of the story), rather than dropping it. Only for titles that
-    # came from a real heading — never a synthetic/default/file-name title.
+    # came from a real heading - never a synthetic/default/file-name title.
     for ch in chapters:
         if ch.get("heading") and ch["title"].strip():
             head = ch["title"].strip()
-            if head[-1] not in ".!?:;,":
+            if head[-1] not in ".!?:;,"
                 head += "."          # give the narrator a natural sentence beat
             ch["spoken_title"] = head
 
@@ -266,7 +268,7 @@ def run(job: dict, progress) -> dict:
         full_text = "\n\n".join(c["text"] for c in chapters)
         cast_map = castmod.auto_cast(full_text, voice, cast_map)
         pretty = ", ".join(
-            f"{('Narrator' if k == 'narrator' else k.title())}→"
+            f"{('Narrator' if k == 'narrator' else k.title())}->"
             f"{(voicecat.get(v) or {}).get('name', v)}"
             for k, v in list(cast_map.items())[:14])
         progress(log=f"Cast: {pretty}")
@@ -280,7 +282,7 @@ def run(job: dict, progress) -> dict:
     progress(stage="Preparing", percent=4,
              chapters_total=len(chapters), chunks_total=total_chunks,
              log=f"{len(chapters)} chapter(s), {total_chunks} segments, {mode}. "
-                 f"Synthesizing on {ENGINE.device.upper()}…")
+                 f"Synthesizing on {ENGINE.device.upper()}...")
 
     # ---- 3. Synthesize ---------------------------------------------------
     # Hold the GPU lock for the whole synth phase and evict the Smart-cast model
@@ -310,15 +312,24 @@ def run(job: dict, progress) -> dict:
                         parts.append(_silence(op["seconds"]))
                         prev_voice = None    # a pause already separates speakers
                         continue
-                    # Only gap between *different* speakers — a character with
+                    # Only gap between *different* speakers - a character with
                     # several lines in a row flows as one continuous turn.
                     if multivoice and prev_voice is not None and op["voice"] != prev_voice:
                         parts.append(SEG_GAP)
                     say = pron.apply(op["text"])          # user pronunciation fixes
+
+                    # Log each chunk for debugging
+                    chunk_start = time.time()
+                    print(f"[convert] Synthesizing chunk {done+1}/{total_chunks} (chapter {idx+1}/{len(chapters)})", flush=True)
+
                     parts.append(synth.synth_chunk(
                         say, op["voice"], op["speed"],
                         exaggeration=op.get("exaggeration", exaggeration),
                         reference_path=reference_path))
+
+                    chunk_elapsed = time.time() - chunk_start
+                    print(f"[convert] Chunk {done+1} took {chunk_elapsed:.2f}s", flush=True)
+
                     prev_voice = op["voice"]
                     done += 1
                     elapsed = time.time() - t0
@@ -339,7 +350,7 @@ def run(job: dict, progress) -> dict:
     bed = job.get("ambience_path") or amb.path_for(job.get("ambience_id"))
     if bed:
         progress(stage="Adding ambience", percent=80,
-                 log="Mixing background sound under the narration…")
+                 log="Mixing background sound under the narration...")
         nch = len(chapter_wavs)
         for ci, cw in enumerate(chapter_wavs):
             progress(stage=f"Adding ambience ({ci + 1}/{nch})",
@@ -366,7 +377,7 @@ def run(job: dict, progress) -> dict:
 
     nch = len(chapter_wavs)
     if "mp3" in formats:
-        progress(stage="Encoding MP3", percent=84, log="Encoding per-chapter MP3 files…")
+        progress(stage="Encoding MP3", percent=84, log="Encoding per-chapter MP3 files...")
         mp3_dir = os.path.join(out_base, f"{title} (MP3)")
         os.makedirs(mp3_dir, exist_ok=True)
         for i, cw in enumerate(chapter_wavs):
@@ -391,7 +402,7 @@ def run(job: dict, progress) -> dict:
 
     m4b_path = None
     if "m4b" in formats:
-        progress(stage="Building audiobook", percent=92, log="Assembling chaptered M4B…")
+        progress(stage="Building audiobook", percent=92, log="Assembling chaptered M4B...")
         concat_path = os.path.join(workdir, "concat.txt")
         with open(concat_path, "w", encoding="utf-8") as f:
             for cw in chapter_wavs:
@@ -423,7 +434,7 @@ def run(job: dict, progress) -> dict:
     # ---- 5. Export to Audiobookshelf ------------------------------------
     exported_to = None
     if job.get("export_abs") and os.path.isdir(LIBRARY_DIR):
-        progress(stage="Adding to Audiobookshelf", percent=97, log="Copying into your library…")
+        progress(stage="Adding to Audiobookshelf", percent=97, log="Copying into your library...")
         book_dir = os.path.join(LIBRARY_DIR, author, title)
         os.makedirs(book_dir, exist_ok=True)
         if m4b_path:

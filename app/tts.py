@@ -21,27 +21,110 @@ class Engine:
             import backends
             backend = backends.current()
             self.device = backend.torch_device
-        except Exception:
+        except Exception as e:
+            print(f"[tts] Backend detection failed: {e}, will try torch fallback", flush=True)
             try:
                 import torch
                 self.device = "cuda" if torch.cuda.is_available() else "cpu"
             except Exception:
                 pass
+        print(f"[tts] Engine initialized with device: {self.device}", flush=True)
         os.makedirs(SAMPLES_DIR, exist_ok=True)
+
+    def _move_kokoro_to_device(self, pipe, device: str) -> bool:
+        """Directly move Kokoro's internal model to the target device.
+
+        Kokoro's KPipeline stores the model in various places depending on version.
+        We try multiple known locations and fall back to walking all attributes.
+        """
+        import torch
+
+        moved_any = False
+
+        # Try known attribute paths first
+        paths_to_try = [
+            "model",
+            "model.bert", 
+            "model.decoder",
+            "model.bert_model",
+            "model.diffusion",
+            "g2p",
+        ]
+
+        for attr_path in paths_to_try:
+            try:
+                parts = attr_path.split(".")
+                obj = pipe
+                for part in parts:
+                    obj = getattr(obj, part, None)
+                    if obj is None:
+                        break
+                if obj is not None and isinstance(obj, torch.nn.Module):
+                    obj.to(device)
+                    print(f"[tts] Moved pipe.{attr_path} to {device}", flush=True)
+                    moved_any = True
+            except Exception as e:
+                print(f"[tts] Could not move pipe.{attr_path}: {e}", flush=True)
+
+        # Also try the generic walker as backup
+        if not moved_any:
+            try:
+                import backends
+                count = backends.move_to_device(pipe, device)
+                if count > 0:
+                    moved_any = True
+            except Exception as e:
+                print(f"[tts] move_to_device fallback failed: {e}", flush=True)
+
+        # Last resort: walk all attributes of pipe.model
+        if not moved_any and hasattr(pipe, 'model'):
+            try:
+                model = pipe.model
+                for attr_name in dir(model):
+                    if attr_name.startswith('_'):
+                        continue
+                    try:
+                        attr = getattr(model, attr_name)
+                        if isinstance(attr, torch.nn.Module):
+                            attr.to(device)
+                            print(f"[tts] Moved model.{attr_name} to {device}", flush=True)
+                            moved_any = True
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"[tts] Attribute walk failed: {e}", flush=True)
+
+        return moved_any
 
     def pipeline(self, lang_code: str):
         with self._lock:
             if lang_code not in self._pipelines:
+                print(f"[tts] Creating KPipeline for lang_code={lang_code}", flush=True)
                 from kokoro import KPipeline
                 pipe = KPipeline(lang_code=lang_code)
+                print(f"[tts] KPipeline created", flush=True)
+
+                # Debug: inspect what Kokoro loaded
+                if hasattr(pipe, 'model'):
+                    import torch
+                    model = pipe.model
+                    print(f"[tts] pipe.model type: {type(model).__name__}", flush=True)
+                    if hasattr(model, 'bert'):
+                        print(f"[tts] model.bert type: {type(model.bert).__name__}", flush=True)
+                    if hasattr(model, 'decoder'):
+                        print(f"[tts] model.decoder type: {type(model.decoder).__name__}", flush=True)
+
                 # Move model to real GPU if available (Kokoro only does CUDA/CPU)
                 if self.device != "cpu":
-                    try:
-                        import backends
-                        backends.move_to_device(pipe, self.device)
-                    except Exception:
-                        pass
+                    print(f"[tts] Attempting to move model to {self.device}...", flush=True)
+                    success = self._move_kokoro_to_device(pipe, self.device)
+                    if success:
+                        print(f"[tts] Model successfully moved to {self.device}", flush=True)
+                    else:
+                        print(f"[tts] WARNING: Could not move model to {self.device}, will run on CPU", flush=True)
+
                 self._pipelines[lang_code] = pipe
+                print(f"[tts] Pipeline cached for {lang_code}", flush=True)
             return self._pipelines[lang_code]
 
     def unload(self):
@@ -49,7 +132,9 @@ class Engine:
         (Ollama, for Smart cast) can claim the VRAM. Pipelines reload lazily
         on the next synth."""
         with self._lock:
+            count = len(self._pipelines)
             self._pipelines.clear()
+            print(f"[tts] Unloaded {count} pipeline(s)", flush=True)
         try:
             import gc
             import torch
@@ -58,8 +143,9 @@ class Engine:
                 torch.cuda.empty_cache()
             if hasattr(torch, "xpu") and hasattr(torch.xpu, "empty_cache"):
                 torch.xpu.empty_cache()
-        except Exception:  # noqa: BLE001
-            pass
+                print("[tts] XPU cache emptied", flush=True)
+        except Exception as e:
+            print(f"[tts] Cache clear error: {e}", flush=True)
 
     @staticmethod
     def clean_speech_text(text: str) -> str:
@@ -114,16 +200,24 @@ class Engine:
         Extra keyword args (exaggeration, reference_path) are accepted for a
         uniform cross-engine interface and ignored by Kokoro."""
         text = self.clean_speech_text(text)
+        print(f"[tts] synth_chunk: voice={voice}, speed={speed}, text_len={len(text)}", flush=True)
         pipe = self.pipeline(voicecat.lang_code(voice))
         audio_parts = []
+        chunk_idx = 0
         for _, _, audio in pipe(text, voice=voice, speed=speed):
+            chunk_idx += 1
             if audio is None:
+                print(f"[tts] Chunk {chunk_idx}: audio is None, skipping", flush=True)
                 continue
             arr = audio.detach().cpu().numpy() if hasattr(audio, "detach") else np.asarray(audio)
             audio_parts.append(arr.astype("float32"))
+            print(f"[tts] Chunk {chunk_idx}: got audio shape={arr.shape}", flush=True)
         if not audio_parts:
+            print("[tts] No audio parts generated!", flush=True)
             return np.zeros(0, dtype="float32")
-        return np.concatenate(audio_parts)
+        result = np.concatenate(audio_parts)
+        print(f"[tts] synth_chunk complete: total_samples={len(result)}", flush=True)
+        return result
 
     def sample_path(self, voice: str) -> str:
         return os.path.join(SAMPLES_DIR, f"{voice}.mp3")
@@ -136,6 +230,7 @@ class Engine:
         import gpu
         with gpu.LOCK:
             gpu.release_ollama()        # reclaim VRAM from Smart cast before TTS
+            print(f"[tts] Generating sample for voice={voice}", flush=True)
             wav = self.synth_chunk(voicecat.SAMPLE_TEXT, voice, speed=1.0)
         tmp_wav = out.replace(".mp3", ".wav")
         sf.write(tmp_wav, wav, SAMPLE_RATE)
@@ -148,6 +243,7 @@ class Engine:
             os.remove(tmp_wav)
         except OSError:
             pass
+        print(f"[tts] Sample saved: {out}", flush=True)
         return out
 
     def prewarm(self, voice_ids):
