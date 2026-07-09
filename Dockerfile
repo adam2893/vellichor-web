@@ -85,6 +85,11 @@ FROM ${TORCH_BACKEND} AS final
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
+RUN pip install --force-reinstall --no-deps \
+    torch==2.5.1+cxx11.abi \
+    torchaudio==2.5.1+cxx11.abi \
+    --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/
+
 # kokoro depends on the standalone triton package, but both CUDA torch and IPEX
 # already include triton internally. Having both causes a double TORCH_LIBRARY
 # registration crash ("Only a single TORCH_LIBRARY can be used to register the
