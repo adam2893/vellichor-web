@@ -92,8 +92,12 @@ def logout():
 @app.get("/api/voices")
 def list_voices():
     be = backends.current()
+    # Show the actual backend device for non-cuda GPUs (ENGINE.device says
+    # "cpu" because torch.cuda.is_available() is correctly False — models
+    # are moved to the real device via move_to_device() after loading).
+    device = be.torch_device if be.id != "cuda" else ENGINE.device
     return {"voices": voicecat.VOICES, "default": voicecat.DEFAULT_VOICE,
-            "device": ENGINE.device,
+            "device": device,
             "backend": {"id": be.id, "label": be.label, "icon": be.icon}}
 
 
@@ -502,7 +506,8 @@ def download(jid: str, name: str):
 @app.get("/healthz")
 def health():
     be = backends.current()
-    return {"ok": True, "device": ENGINE.device,
+    device = be.torch_device if be.id != "cuda" else ENGINE.device
+    return {"ok": True, "device": device,
             "backend": {"id": be.id, "label": be.label}}
 
 

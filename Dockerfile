@@ -93,6 +93,11 @@ RUN pip uninstall -y triton 2>/dev/null || true
 
 COPY app/ /app/
 
+# Hugging Face Hub: disable symlinks (symlinks break on FUSE/shfs — Unraid
+# and network mounts). Also enable the faster Rust downloader if available.
+ENV HF_HUB_DISABLE_SYMLINKS=1 \
+    HF_HUB_ENABLE_HF_TRANSFER=1
+
 EXPOSE 7777
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s \
     CMD curl -fsS http://localhost:7777/healthz || exit 1
