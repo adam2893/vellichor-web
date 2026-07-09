@@ -33,7 +33,15 @@ class Engine:
         with self._lock:
             if lang_code not in self._pipelines:
                 from kokoro import KPipeline
-                self._pipelines[lang_code] = KPipeline(lang_code=lang_code)
+                pipe = KPipeline(lang_code=lang_code)
+                # Move model to real GPU if available (Kokoro only does CUDA/CPU)
+                if self.device != "cpu":
+                    try:
+                        import backends
+                        backends.move_to_device(pipe, self.device)
+                    except Exception:
+                        pass
+                self._pipelines[lang_code] = pipe
             return self._pipelines[lang_code]
 
     def unload(self):
@@ -45,12 +53,10 @@ class Engine:
         try:
             import gc
             import torch
-            import backends
             gc.collect()
-            be = backends.current()
-            if be.id == "cuda" and torch.cuda.is_available():
+            if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-            elif hasattr(torch, "xpu") and hasattr(torch.xpu, "empty_cache"):
+            if hasattr(torch, "xpu") and hasattr(torch.xpu, "empty_cache"):
                 torch.xpu.empty_cache()
         except Exception:  # noqa: BLE001
             pass

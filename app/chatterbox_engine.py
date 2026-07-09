@@ -52,7 +52,14 @@ class ChatterboxEngine:
         with self._lock:
             if self._model is None:
                 from chatterbox.tts import ChatterboxTTS
-                self._model = ChatterboxTTS.from_pretrained(device=self.device)
+                try:
+                    self._model = ChatterboxTTS.from_pretrained(device=self.device)
+                except Exception:
+                    # If 'xpu'/'vulkan' not accepted, load on CPU then move
+                    self._model = ChatterboxTTS.from_pretrained(device="cpu")
+                    if self.device != "cpu":
+                        import backends
+                        backends.move_to_device(self._model, self.device)
             return self._model
 
     def synth_chunk(self, text: str, voice: str = None, speed: float = 1.0, *,
@@ -83,12 +90,10 @@ class ChatterboxEngine:
         try:
             import gc
             import torch
-            import backends
             gc.collect()
-            be = backends.current()
-            if be.id == "cuda" and torch.cuda.is_available():
+            if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-            elif hasattr(torch, "xpu") and hasattr(torch.xpu, "empty_cache"):
+            if hasattr(torch, "xpu") and hasattr(torch.xpu, "empty_cache"):
                 torch.xpu.empty_cache()
         except Exception:  # noqa: BLE001
             pass
