@@ -1,7 +1,6 @@
-docker exec Vellichor-ARC sh -c 'cat > /app/chatterbox_engine.py << "EOF"
 """Chatterbox (Resemble AI) TTS backend.
 
-Expressive TTS: one \"exaggeration\" intensity dial plus zero-shot voice cloning
+Expressive TTS: one "exaggeration" intensity dial plus zero-shot voice cloning
 from a short reference clip. Loaded lazily and unloaded after a job so its VRAM
 can go back to Kokoro / the Ollama Smart-cast model (they can't all coexist on
 an 8 GB card). Output is resampled to the pipeline's 24 kHz.
@@ -116,4 +115,3 @@ class ChatterboxEngine:
 
 
 ENGINE = ChatterboxEngine()
-EOF'
