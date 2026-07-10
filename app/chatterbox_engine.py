@@ -77,6 +77,13 @@ class ChatterboxEngine:
                     print(f"[chatterbox] Loading on CPU then moving submodules...", flush=True)
                     self._model = ChatterboxTTS.from_pretrained(device="cpu")
                     moved = self._move_submodules_to_device(self._model, self.device)
+                    # from_pretrained(device="cpu") sets self.device="cpu" inside
+                    # the model. generate() uses self.device to place input tensors,
+                    # so we must fix it to the real target or we get a device
+                    # mismatch (weights on xpu, inputs on cpu).
+                    self._model.device = self.device
+                    if self._model.conds is not None:
+                        self._model.conds = self._model.conds.to(self.device)
                     print(f"[chatterbox] Moved {moved} submodules to {self.device}", flush=True)
             return self._model
 
