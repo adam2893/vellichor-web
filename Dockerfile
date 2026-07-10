@@ -63,7 +63,7 @@ RUN wget -qO - https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-P
 RUN wget -qO - https://repositories.intel.com/gpu/intel-graphics.key \
     | gpg --dearmor > /usr/share/keyrings/intel-graphics.gpg \
     && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] \
-    https://repositories.intel.com/graphics/ubuntu jammy arc" \
+    https://repositories.intel.com/gpu/ubuntu jammy client" \
     > /etc/apt/sources.list.d/intel.gpu.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
