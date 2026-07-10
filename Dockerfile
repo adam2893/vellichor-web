@@ -19,7 +19,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # ffmpeg = audio encoding/m4b assembly; espeak-ng = Kokoro G2P fallback /
 # non-English phonemization; libsndfile1 = soundfile backend.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ffmpeg espeak-ng libsndfile1 git curl ca-certificates \
+        ffmpeg espeak-ng libsndfile1 git curl ca-certificates gnupg wget \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -43,8 +43,19 @@ FROM base AS openvino
 #
 # libze1 provides the Level Zero loader that PyTorch XPU uses to talk to the
 # GPU through /dev/dri. The actual compute runtime lives on the HOST.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+#
+# FIX: Added Intel oneAPI apt repository and runtime libraries (libsycl.so.8
+# and friends) that the XPU PyTorch wheel is dynamically linked against.
+# Without these, torch import fails with: ImportError: libsycl.so.8 not found.
+RUN wget -qO - https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
+    | gpg --dearmor > /usr/share/keyrings/intel-oneapi-archive-keyring.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/intel-oneapi-archive-keyring.gpg] \
+    https://apt.repos.intel.com/oneapi all main" > /etc/apt/sources.list.d/oneAPI.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
         libze1 \
+        intel-oneapi-runtime-compilers \
+        intel-oneapi-runtime-opencl \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --retries 10 --timeout 300 \
@@ -85,10 +96,10 @@ FROM ${TORCH_BACKEND} AS final
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
-RUN pip install --force-reinstall --no-deps \
-    torch==2.5.1+cxx11.abi \
-    torchaudio==2.5.1+cxx11.abi \
-    --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/
+# BUG FIX: Removed the forced torch reinstall that was here. It used to
+# overwrite whatever backend-specific torch was installed above with the
+# Intel XPU wheel, breaking CUDA/Vulkan/CPU builds. Each backend stage
+# now installs its own torch *before* this final stage.
 
 # kokoro depends on the standalone triton package, but both CUDA torch and IPEX
 # already include triton internally. Having both causes a double TORCH_LIBRARY
