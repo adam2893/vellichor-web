@@ -67,7 +67,6 @@ RUN wget -qO - https://repositories.intel.com/gpu/intel-graphics.key \
     > /etc/apt/sources.list.d/intel.gpu.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
-        level-zero \
         intel-level-zero-gpu \
         intel-opencl-icd \
         intel-oneapi-runtime-compilers \
