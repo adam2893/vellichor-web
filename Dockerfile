@@ -58,8 +58,8 @@ WORKDIR /app
 
 # kobuk-team Intel Graphics PPA — Battlemage-capable driver packages
 # (libze-intel-gpu1 build 38646, above the 33578 minimum).
-RUN gpg --no-default-keyring --keyring /usr/share/keyrings/kobuk-intel-graphics.gpg \
-        --keyserver keyserver.ubuntu.com --recv-keys AFBE5E1F \
+RUN wget -qO - "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x0C0E6AF955CE463C03FC51574D098D70AFBE5E1F&options=mr" \
+    | gpg --dearmor > /usr/share/keyrings/kobuk-intel-graphics.gpg \
     && echo "deb [signed-by=/usr/share/keyrings/kobuk-intel-graphics.gpg] \
     https://ppa.launchpadcontent.net/kobuk-team/intel-graphics/ubuntu noble main" \
     > /etc/apt/sources.list.d/kobuk-intel-graphics.list
