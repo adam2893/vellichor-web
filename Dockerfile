@@ -28,8 +28,6 @@ WORKDIR /app
 # CUDA backend (NVIDIA) — default
 # -----------------------------------------------------------------
 FROM base AS cuda
-# CUDA 12.4 PyTorch — still supports the GTX 1080 (Pascal, sm_61). Pinned to
-# 2.6.0 to satisfy chatterbox-tts's exact torch pin.
 RUN pip install --retries 10 --timeout 300 torch==2.6.0 torchaudio==2.6.0 \
     --index-url https://download.pytorch.org/whl/cu124
 
@@ -37,16 +35,12 @@ RUN pip install --retries 10 --timeout 300 torch==2.6.0 torchaudio==2.6.0 \
 # OpenVINO backend (Intel Arc / iGPU)
 # -----------------------------------------------------------------
 FROM base AS openvino
-# PyTorch 2.5+ has native Intel GPU support (torch.xpu device). The +cxx11.abi
-# wheel from Intel's index includes XPU compiled in. No IPEX needed — simpler,
-# no ABI mismatch, no execstack issues.
+# PyTorch native XPU support is upstreamed into PyTorch 2.6+.
+# We use the official PyTorch XPU wheel index (NOT Intel's old extension index).
+# The 2.6.0+xpu wheel satisfies chatterbox-tts's torch==2.6.0 requirement.
 #
-# libze1 provides the Level Zero loader that PyTorch XPU uses to talk to the
-# GPU through /dev/dri. The actual compute runtime lives on the HOST.
-#
-# FIX: Added Intel oneAPI apt repository and runtime libraries (libsycl.so.8
-# and friends) that the XPU PyTorch wheel is dynamically linked against.
-# Without these, torch import fails with: ImportError: libsycl.so.8 not found.
+# Intel oneAPI runtime libraries (libsycl.so.8, Level Zero) are still required
+# for the XPU backend to talk to the GPU through /dev/dri.
 RUN wget -qO - https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
     | gpg --dearmor > /usr/share/keyrings/intel-oneapi-archive-keyring.gpg \
     && echo "deb [signed-by=/usr/share/keyrings/intel-oneapi-archive-keyring.gpg] \
@@ -59,22 +53,16 @@ RUN wget -qO - https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-P
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --retries 10 --timeout 300 \
-    torch==2.5.1+cxx11.abi \
-    torchaudio==2.5.1+cxx11.abi \
-    --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/
+    torch==2.6.0+xpu \
+    torchaudio==2.6.0+xpu \
+    --index-url https://download.pytorch.org/whl/xpu
 
-# OpenVINO runtime for device detection / optional ONNX acceleration
 RUN pip install openvino==2025.2.0
 
 # -----------------------------------------------------------------
 # Vulkan backend (AMD / cross-vendor) — experimental
 # -----------------------------------------------------------------
 FROM base AS vulkan
-# Vulkan compute: needs libvulkan1, Mesa Vulkan drivers (radeonsi for AMD,
-# intel for Arc), and a PyTorch build with USE_VULKAN.  Stock pip wheels
-# don't ship with Vulkan; we install the standard CPU wheel and attempt to
-# enable Vulkan at runtime via PyTorch's dynamic backend loading.
-# For true Vulkan acceleration, rebuild PyTorch from source with USE_VULKAN=1.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libvulkan1 mesa-vulkan-drivers vulkan-tools \
     && rm -rf /var/lib/apt/lists/*
@@ -96,15 +84,10 @@ FROM ${TORCH_BACKEND} AS final
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
-# BUG FIX: Removed the forced torch reinstall that was here. It used to
-# overwrite whatever backend-specific torch was installed above with the
-# Intel XPU wheel, breaking CUDA/Vulkan/CPU builds. Each backend stage
-# now installs its own torch *before* this final stage.
-
-# kokoro depends on the standalone triton package, but both CUDA torch and IPEX
-# already include triton internally. Having both causes a double TORCH_LIBRARY
-# registration crash ("Only a single TORCH_LIBRARY can be used to register the
-# namespace triton"). Remove the standalone package — the bundled one suffices.
+# kokoro depends on the standalone triton package, but both CUDA torch and
+# PyTorch XPU already include triton internally. Having both causes a double
+# TORCH_LIBRARY registration crash ("Only a single TORCH_LIBRARY can be used
+# to register the namespace triton"). Remove the standalone package.
 RUN pip uninstall -y triton 2>/dev/null || true
 
 COPY app/ /app/
