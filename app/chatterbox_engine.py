@@ -1,6 +1,7 @@
+docker exec Vellichor-ARC sh -c 'cat > /app/chatterbox_engine.py << "EOF"
 """Chatterbox (Resemble AI) TTS backend.
 
-Expressive TTS: one "exaggeration" intensity dial plus zero-shot voice cloning
+Expressive TTS: one \"exaggeration\" intensity dial plus zero-shot voice cloning
 from a short reference clip. Loaded lazily and unloaded after a job so its VRAM
 can go back to Kokoro / the Ollama Smart-cast model (they can't all coexist on
 an 8 GB card). Output is resampled to the pipeline's 24 kHz.
@@ -48,18 +49,36 @@ class ChatterboxEngine:
             except Exception:
                 pass
 
+    def _move_submodules_to_device(self, model, device: str):
+        """ChatterboxTTS is not an nn.Module, so we manually move its submodules."""
+        import torch
+        moved = 0
+        # Known submodule names in ChatterboxTTS
+        for attr in ("t3", "s3gen", "ve", "watermarker"):
+            submodule = getattr(model, attr, None)
+            if submodule is not None and isinstance(submodule, torch.nn.Module):
+                try:
+                    submodule.to(device)
+                    moved += 1
+                except Exception as e:
+                    print(f"[chatterbox] Failed to move {attr} to {device}: {e}", flush=True)
+        return moved
+
     def _load(self):
         with self._lock:
             if self._model is None:
                 from chatterbox.tts import ChatterboxTTS
+                print(f"[chatterbox] Loading model (target device: {self.device})...", flush=True)
                 try:
+                    # Try loading directly on target device first
                     self._model = ChatterboxTTS.from_pretrained(device=self.device)
-                except Exception:
-                    # If 'xpu'/'vulkan' not accepted, load on CPU then move
+                    print(f"[chatterbox] Loaded directly on {self.device}", flush=True)
+                except Exception as e:
+                    print(f"[chatterbox] Direct load on {self.device} failed: {e}", flush=True)
+                    print(f"[chatterbox] Loading on CPU then moving submodules...", flush=True)
                     self._model = ChatterboxTTS.from_pretrained(device="cpu")
-                    if self.device != "cpu":
-                        import backends
-                        backends.move_to_device(self._model, self.device)
+                    moved = self._move_submodules_to_device(self._model, self.device)
+                    print(f"[chatterbox] Moved {moved} submodules to {self.device}", flush=True)
             return self._model
 
     def synth_chunk(self, text: str, voice: str = None, speed: float = 1.0, *,
@@ -68,13 +87,10 @@ class ChatterboxEngine:
         """Synthesize one chunk -> float32 mono @ 24 kHz. `reference_path` clones
         that voice; without it Chatterbox uses its built-in default voice."""
         model = self._load()
-        # Chatterbox has no true speed multiplier; cfg_weight=0.5 is the model's
-        # well-tested default. `speed` is accepted for interface parity only.
         kwargs = {"exaggeration": float(exaggeration), "cfg_weight": 0.5}
         if reference_path:
             kwargs["audio_prompt_path"] = reference_path
         wav = model.generate(text, **kwargs)
-        # torch.Tensor [1, N] (or [N]) -> mono float32 numpy
         try:
             arr = wav.detach().cpu().numpy()
         except AttributeError:
@@ -100,3 +116,4 @@ class ChatterboxEngine:
 
 
 ENGINE = ChatterboxEngine()
+EOF'
