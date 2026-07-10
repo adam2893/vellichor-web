@@ -34,50 +34,58 @@ RUN pip install --retries 10 --timeout 300 torch==2.6.0 torchaudio==2.6.0 \
 # -----------------------------------------------------------------
 # OpenVINO backend (Intel Arc / iGPU)
 # -----------------------------------------------------------------
-FROM base AS openvino
-# PyTorch native XPU support via the official XPU wheel index.
-#
-# Two apt repos are needed:
-#   1. oneAPI repo  — SYCL runtime (libsycl.so) for PyTorch's SYCL backend
-#   2. Intel GPU repo — Level Zero loader + Intel GPU adapter + OpenCL ICD
-#
-# The Intel GPU adapter (libze_intel_gpu.so.1, from intel-level-zero-gpu) is
-# REQUIRED for PyTorch XPU to enumerate devices. libze1 / level-zero is just
-# the loader — without the adapter, torch.xpu.device_count() returns 0 and
-# everything silently runs on CPU. /dev/dri passthrough only shares the kernel
-# render node; the userspace driver stack must be installed inside the container.
-#
-# We use intel-opencl-icd (GPU repo) instead of intel-oneapi-runtime-opencl
-# (oneAPI repo) to avoid a dpkg file-overwrite conflict over libze_intel_gpu.so.1.
-#
-# Battlemage (Arc B580, Xe2) requires PyTorch >= 2.7 for precompiled kernels.
-# 2.6.0+xpu has no xe2 AOT kernels and will fail or fall back to slow JIT.
+# This stage uses Ubuntu 24.04 (not python:3.11-slim) because Battlemage
+# (Arc B580, Xe2) requires Intel GPU driver build >= 33578 (Oct 2024), and
+# those packages are only available from the kobuk-team PPA which targets
+# Ubuntu noble (libc6 >= 2.38). Intel's own apt repos top out at build 30049,
+# which predates Battlemage support. Python 3.12 (Ubuntu 24.04 default) is
+# used instead of 3.11 — the app code is version-agnostic.
+FROM ubuntu:24.04 AS openvino
 
-# oneAPI repo: SYCL runtime only
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONUNBUFFERED=1 \
+    HF_HOME=/data/hf-cache \
+    PYTHONPATH=/app
+
+# System deps + Python 3.12
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3 python3-pip \
+        ffmpeg espeak-ng libsndfile1 git curl ca-certificates gnupg wget \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# kobuk-team Intel Graphics PPA — Battlemage-capable driver packages
+# (libze-intel-gpu1 build 38646, above the 33578 minimum).
+RUN gpg --no-default-keyring --keyring /usr/share/keyrings/kobuk-intel-graphics.gpg \
+        --keyserver keyserver.ubuntu.com --recv-keys AFBE5E1F \
+    && echo "deb [signed-by=/usr/share/keyrings/kobuk-intel-graphics.gpg] \
+    https://ppa.launchpadcontent.net/kobuk-team/intel-graphics/ubuntu noble main" \
+    > /etc/apt/sources.list.d/kobuk-intel-graphics.list
+
+# oneAPI repo: SYCL runtime (libsycl.so) for PyTorch's SYCL backend
 RUN wget -qO - https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
     | gpg --dearmor > /usr/share/keyrings/intel-oneapi-archive-keyring.gpg \
     && echo "deb [signed-by=/usr/share/keyrings/intel-oneapi-archive-keyring.gpg] \
     https://apt.repos.intel.com/oneapi all main" > /etc/apt/sources.list.d/oneAPI.list
 
-# Intel GPU repo: Level Zero loader + GPU adapter + OpenCL ICD
-RUN wget -qO - https://repositories.intel.com/gpu/intel-graphics.key \
-    | gpg --dearmor > /usr/share/keyrings/intel-graphics.gpg \
-    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] \
-    https://repositories.intel.com/gpu/ubuntu jammy client" \
-    > /etc/apt/sources.list.d/intel.gpu.list \
-    && apt-get update \
+# Level Zero loader + Intel GPU adapter + OpenCL ICD + SYCL runtime
+RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        intel-level-zero-gpu \
+        libze1 \
+        libze-intel-gpu1 \
         intel-opencl-icd \
         intel-oneapi-runtime-compilers \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --retries 10 --timeout 300 \
+# Battlemage (Arc B580, Xe2) requires PyTorch >= 2.7 for precompiled kernels.
+RUN pip install --break-system-packages --retries 10 --timeout 300 \
     torch==2.7.1+xpu \
     torchaudio==2.7.1+xpu \
     --index-url https://download.pytorch.org/whl/xpu
 
-RUN pip install openvino==2025.2.0
+RUN pip install --break-system-packages openvino==2025.2.0
 
 # -----------------------------------------------------------------
 # Vulkan backend (AMD / cross-vendor) — experimental
@@ -103,13 +111,20 @@ FROM ${TORCH_BACKEND} AS final
 
 ARG TORCH_BACKEND
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+
+# Ubuntu 24.04 (openvino) enforces PEP 668 — pip needs --break-system-packages.
+# The python:3.11-slim base (cuda/vulkan/cpu) does not.
+RUN if [ "$TORCH_BACKEND" = "openvino" ]; then \
+        pip install --break-system-packages -r requirements.txt; \
+    else \
+        pip install -r requirements.txt; \
+    fi
 
 # chatterbox-tts pins torch==2.6.0, which downgrades the 2.7.1+xpu wheel
 # installed in the openvino stage. Reinstall the XPU torch for Battlemage
 # support. Other backends are unaffected (their torch already satisfies the pin).
 RUN if [ "$TORCH_BACKEND" = "openvino" ]; then \
-        pip install --retries 10 --timeout 300 \
+        pip install --break-system-packages --retries 10 --timeout 300 \
             torch==2.7.1+xpu torchaudio==2.7.1+xpu \
             --index-url https://download.pytorch.org/whl/xpu; \
     fi
